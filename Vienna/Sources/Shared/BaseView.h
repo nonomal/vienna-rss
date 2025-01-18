@@ -19,13 +19,10 @@
 //
 
 @import Cocoa;
-@import WebKit;
 
 @protocol BaseView
 @required
 	-(void)performFindPanelAction:(NSInteger)tag;
-	-(void)printDocument:(id)sender;
-	@property (readonly, nonatomic) NSString *viewLink;
 	@property (nonatomic, readonly) NSView *mainView;
 	-(BOOL)handleKeyDown:(unichar)keyChar withFlags:(NSUInteger)flags;
 @optional
@@ -35,6 +32,5 @@
 	-(IBAction)handleGoBack:(id)sender;
 	@property (nonatomic, readonly) BOOL canGoForward;
 	@property (nonatomic, readonly) BOOL canGoBack;
-	@property (nonatomic, readonly) WebView *webView;
 @end
 

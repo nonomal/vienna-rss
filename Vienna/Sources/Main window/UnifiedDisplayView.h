@@ -23,22 +23,12 @@
 #import "MessageListView.h"
 
 @class AppController;
-@class ExtendedTableView;
 
-@interface UnifiedDisplayView : NSView <BaseView, ArticleBaseView, NSMenuItemValidation, MessageListViewDelegate, NSTableViewDataSource, WKScriptMessageHandler>
-{
-    IBOutlet ExtendedTableView *articleList;
-
-	NSTimer * markReadTimer;
-
-	NSMutableArray * rowHeightArray;
-	NSProgressIndicator * progressIndicator;
-}
+@interface UnifiedDisplayView : NSView <BaseView, ArticleBaseView, NSMenuItemValidation, MessageListViewDelegate, NSTableViewDataSource, ExtendedTableViewDelegate>
 
 @property (weak, nonatomic) AppController *controller;
 
 // Public functions
 -(void)saveTableSettings;
-- (void)webViewLoadFinished:(NSNotification *)notification;
 
 @end

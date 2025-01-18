@@ -23,8 +23,14 @@
 
 @class Folder;
 @class Field;
-@class CriteriaTree;
 @class Article;
+@class ArticleReference;
+@class CriteriaTree;
+
+typedef NS_OPTIONS(NSInteger, VNAQueryScope) {
+    VNAQueryScopeInclusive = 1,
+    VNAQueryScopeSubFolders = 2
+} NS_SWIFT_NAME(QueryScope);
 
 @interface Database : NSObject
 
@@ -36,11 +42,10 @@ extern NSNotificationName const VNADatabaseDidDeleteFolderNotification;
 @property(nonatomic) FMDatabaseQueue * databaseQueue;
 @property (copy, nonatomic) NSString *searchString;
 
-@property (class, readonly) Database *sharedManager NS_SWIFT_NAME(shared);
+@property (class, readonly, nonatomic) Database *sharedManager NS_SWIFT_NAME(shared);
 
 // General database functions
 - (instancetype)initWithDatabaseAtPath:(NSString *)dbPath /*NS_DESIGNATED_INITIALIZER*/;
--(void)syncLastUpdate;
 -(void)compactDatabase;
 -(void)reindexDatabase;
 @property (nonatomic, readonly) NSInteger countOfUnread;
@@ -63,6 +68,7 @@ extern NSNotificationName const VNADatabaseDidDeleteFolderNotification;
 -(Folder *)folderFromFeedURL:(NSString *)wantedFeedURL;
 -(Folder *)folderFromRemoteId:(NSString *)wantedRemoteId;
 -(Folder *)folderFromName:(NSString *)wantedName;
+-(NSString *)sqlScopeForFolder:(Folder *)folder flags:(VNAQueryScope)scopeFlags field:(NSString *)field;
 -(NSInteger)addFolder:(NSInteger)parentId afterChild:(NSInteger)predecessorId folderName:(NSString *)name type:(NSInteger)type canAppendIndex:(BOOL)canAppendIndex;
 -(BOOL)deleteFolder:(NSInteger)folderId;
 -(BOOL)setName:(NSString *)newName forFolder:(NSInteger)folderId;
@@ -98,14 +104,13 @@ extern NSNotificationName const VNADatabaseDidDeleteFolderNotification;
 -(NSInteger)addSmartFolder:(NSString *)folderName underParent:(NSInteger)parentId withQuery:(CriteriaTree *)criteriaTree;
 -(void)updateSearchFolder:(NSInteger)folderId withFolder:(NSString *)folderName withQuery:(CriteriaTree *)criteriaTree;
 -(CriteriaTree *)searchStringForSmartFolder:(NSInteger)folderId;
--(NSString *)criteriaToSQL:(CriteriaTree *)criteriaTree;
 
 // Article functions
 -(BOOL)addArticle:(Article *)article toFolder:(NSInteger)folderID;
 -(BOOL)updateArticle:(Article *)existingArticle ofFolder:(NSInteger)folderID withArticle:(Article *)article;
 -(BOOL)deleteArticle:(Article *)article;
--(NSArray *)arrayOfUnreadArticlesRefs:(NSInteger)folderId;
--(NSArray *)arrayOfArticles:(NSInteger)folderId filterString:(NSString *)filterString;
+-(NSArray<ArticleReference *> *)arrayOfUnreadArticlesRefs:(NSInteger)folderId;
+-(NSArray<Article *> *)arrayOfArticles:(NSInteger)folderId filterString:(NSString *)filterString;
 -(void)markArticleRead:(NSInteger)folderId guid:(NSString *)guid isRead:(BOOL)isRead;
 -(void)markArticleFlagged:(NSInteger)folderId guid:(NSString *)guid isFlagged:(BOOL)isFlagged;
 -(void)markArticleDeleted:(Article *)article isDeleted:(BOOL)isDeleted;

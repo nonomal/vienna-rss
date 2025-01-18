@@ -1,16 +1,14 @@
 # Contributing to Vienna
 
-## Debugging
-
-dSYM files containing the debug symbols can be found at [bintray](https://bintray.com/viennarss/vienna-rss/vienna-rss/).
-
 ## Writing code
 
-The current version of Vienna requires Xcode 12.2 and the macOS 11 SDK. Most of Vienna is made with Objective-C, but some newer code is being created in Swift 5. We welcome both Objective-C and Swift contributions.
+We currently build Vienna with Xcode 16 and the macOS 15 SDK.
+
+Most of Vienna is made with Objective-C, but some newer code is being created in Swift. We welcome both Objective-C and Swift contributions.
 
 You should have a basic knowledge of Git and read this [suggested workflow](https://github.com/ViennaRSS/vienna-rss/wiki/Good-manners-with-Git).
 
-As a starting point, search for any [issues with the *help-wanted* label](https://github.com/ViennaRSS/vienna-rss/labels/help%20wanted).
+As a starting point, search for any [issues with the *help wanted 🆘* label](https://github.com/ViennaRSS/vienna-rss/labels/help%20wanted%20%3Asos%3A).
 
 Please let us know what you are working on by posting an issue on Vienna's github and assigning it to yourself.
 
@@ -35,6 +33,6 @@ For Swift code, please try to follow the [GitHub Swift Style Guide](https://gith
 5. Do not end the subject line with a period.
 
 6. Use the body to explain _what_ and _why_ (and not on the _how_). Focus on the reasons which required the change - the way things worked before the change (and what was wrong with that), the way they work now, and why you decided to solve it the way you did.  
-You may reference issues/discussions raised at Github or Cocoaforge, but avoid relying heavily on them: a reviewer should be able to make an analysis based solely on code and commit messages.
+You may reference issues/discussions raised at GitHub, but avoid relying heavily on them: a reviewer should be able to make an analysis based solely on code and commit messages.
 
 7. It is recommended to hard wrap the body text at 72 characters (except for quoted material that is non-prose, like compiler error messages).

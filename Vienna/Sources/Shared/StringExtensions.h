@@ -19,9 +19,8 @@
 //
 
 @import Foundation;
-@import WebKit;
 
-#define SafeString(s) ((s) ?: @"")
+#define SafeString(s) s ? (s) : @""
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -48,10 +47,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSUInteger)vna_indexOfCharacterInString:(char)ch afterIndex:(NSUInteger)startIndex;
 @property (readonly, nonatomic) NSString *vna_stringByEscapingExtendedCharacters;
 @property (readonly, nonatomic) NSString *vna_stringByUnescapingExtendedCharacters;
-- (NSString *)vna_stringByAppendingURLComponent:(nullable NSString *)newComponent;
 - (BOOL)vna_hasCharacter:(char)ch;
 @property (readonly, nonatomic) NSString *vna_convertStringToValidPath;
-- (NSComparisonResult)vna_numericCompare:(NSString *)aString;
+- (NSComparisonResult)vna_caseInsensitiveNumericCompare:(NSString *)string;
 @property (readonly, nonatomic) NSString *vna_normalised;
 @property (readonly, nonatomic) NSString *vna_baseURL;
 @property (readonly, nonatomic) NSString *vna_host;

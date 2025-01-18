@@ -24,16 +24,7 @@
 
 #define PROGRESS_INDICATOR_DIMENSION	16
 
-
-@interface TreeNode : NSObject {
-	TreeNode * parentNode;
-	NSMutableArray * children;
-	Folder * folder;
-	NSInteger nodeId;
-	BOOL canHaveChildren;
-	
-	NSProgressIndicator * progressIndicator;
-}
+@interface TreeNode : NSObject
 
 // Accessor functions
 -(instancetype)init:(TreeNode *)parentNode atIndex:(NSInteger)insertIndex folder:(Folder *)folder canHaveChildren:(BOOL)childflag /*NS_DESIGNATED_INITIALIZER*/;
@@ -54,9 +45,5 @@
 @property (nonatomic, readonly) NSUInteger countOfChildren;
 @property (nonatomic) BOOL canHaveChildren;
 -(NSComparisonResult)folderNameCompare:(TreeNode *)otherObject;
-
--(void)allocAndStartProgressIndicatorWithFrame:(NSRect)frame inView:(NSView *)controlView;
--(void)stopAndReleaseProgressIndicator;
-@property (nonatomic, readonly) NSProgressIndicator *progressIndicator;
 
 @end

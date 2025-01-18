@@ -5,9 +5,7 @@ Instructions for building and uploading Vienna binaries to Github and Sourceforg
 ### Build settings
 In Xcode->File->Project settings…, you should have :
 
-- Build System : New Build System
-- Derived Data : Project-relative Location
-	- DerivedData
+- Derived Data : Default Location
 - Advanced… : Build Location : Custom : Relative to Workspace
 	- Products : Build/Products
 	- Intermediates : Build/Intermediates.noindex
@@ -24,16 +22,13 @@ should be exactly the name of your certificate as it is stored in Keychain.
 `PRIVATE_EDDSA_KEY_PATH`  
 should be the location of the private EdDSA (ed25519) key used by Sparkle 2, which for obvious security reasons should not be located in the source directory !
 
-`PRIVATE_KEY_PATH`  
-should be the location of the (legacy) private DSA key used by Sparkle, which for obvious security reasons should not be located in the source directory !
-
-If you want to go further in automation of package building, you will have to define three additional environment variables in the `CS-ID.xcconfig` file. These ones are used to automate the use of the `altool` command line tool as described in [this page of Apple's documentation](https://developer.apple.com/documentation/xcode/notarizing_macos_software_before_distribution/customizing_the_notarization_workflow).
+If you want to go further in automation of package building, you will have to define three additional environment variables in the `CS-ID.xcconfig` file. These ones are used to automate the use of the `notarytool` command line tool as described in [this page of Apple's documentation](https://developer.apple.com/documentation/xcode/notarizing_macos_software_before_distribution/customizing_the_notarization_workflow).
 
 `APP_STORE_ID`  
 is the Apple ID used to connect to App Store Connect
 
-`APP_STORE_PASSWORD`  
-is an app-specific password created for `altool`
+`KEYCHAIN_PROFILE`  
+is the key to an app-specific password created for `notarytool` and stored through `xcrun notarytool store-credentials …`
 
 `TEAM_ID`  
 is the appropriate developer team identifier. It is generally a 10-character code. You can look-up the teams you are part of in the “Membership” area of [Apple's developer portal](https://developer.apple.com/account/).
@@ -43,9 +38,8 @@ For instance, the content of my `Scripts/Resources/CS-ID.xcconfig` file looks li
 
     CODE_SIGN_IDENTITY = Developer ID Application: Barijaona Ramaholimihaso
     PRIVATE_EDDSA_KEY_PATH = $(SRCROOT)/../secrets/vienna_private_eddsa_key.pem
-    PRIVATE_KEY_PATH = $(SRCROOT)/../secrets/vienna_private_key.pem
     APP_STORE_ID = barijaona@mac.com
-    APP_STORE_PASSWORD = @keychain:altool-barijaona@mac.com
+    KEYCHAIN_PROFILE = AC_PASSWORD
     TEAM_ID = KUU2LM7U9K
 
 __Note:__ Vienna maintainers can [contact me](https://github.com/barijaona "Github") to get provisioning profiles for the above mentioned Team ID, in order to decentralize the distribution of Vienna's official builds.
@@ -69,8 +63,8 @@ Tags should be in one of the following formats:
 ## Steps before releasing Vienna: ##
 
  1.	Review all recent code changes and make sure you should not change `MACOSX_DEPLOYMENT_TARGET` in the project configuration in order to protect users whose machines do not match minimum macOS requirements from a counter-productive "upgrade".
- 2.	Make sure that the "CHANGES" file is up to date.
- 3.	Copy the most recent part of "CHANGES" in a new text document and process it with Markdown to get a new "notes.html".
+ 2.	Update the "CHANGELOG.md" file with a summary of the changes for this build. The most recent build should be at the top of this file. Interesting advices on writing a good changelog can be found [in this blog post](https://xavd.id/blog/post/effective-changelogs/).
+ 3.	Copy the most recent part of "CHANGELOG.md" in a new Markdown document to generate a new "notes.html" file. This file will be displayed by the autoupdate mechanism when the new version will be detected.
  4.	Commit anything unstaged (on `master` branch if you are releasing a beta or on `stable` branch if you are doing a normal release).
  5.	Make a new tag using `git tag -s` _tagname_, respecting the above mentioned convention (if you do not have a gpg key, you can use `git tag -a` instead).
 
@@ -86,7 +80,7 @@ There are two distinct ways to get the different files needed to publish an upda
 - Select the latest archive, click the "Distribute App" button,
 - Select "Developer ID" as method of distribution,
 - Accept the values proposed in the following prompts,
-- Wait for the upload to finish, then a mail notification from Apple informing you that the software was successfully notarized,
+- Wait for the upload to finish, then the message informing you that the software was successfully notarized,
 - Close the organizer, select scheme "Deployment" at the top of Xcode's main window,
 - Run the Deployment scheme,
 - The Uploads window should open in the Finder after a while.
@@ -109,8 +103,8 @@ There are two distinct ways to get the different files needed to publish an upda
 
    1. Go to Vienna's releases page on Github : <https://github.com/ViennaRSS/vienna-rss/releases>
    2. Choose "Draft a new release", type the tag name (`v/3.3.0_beta4`), a description ("Vienna 3.3.0 Beta 4").
-   3. Upload the `Vienna3.3.0_beta4.tar.gz` file.
-   4. Upload also the compressed dSYM file (whose nome should be something similar to `Vienna3.3.0_beta4.5b272a6-dSYM.tar.gz`)
+   3. Upload the `Vienna3.3.0_beta4.tgz` file (if you use drag and drop, make sure to drop it on the "<i>Attach binaries by dropping them here or selecting them</i>" area and not on the text area).
+   4. Upload also the compressed dSYM file (whose nome should be something similar to `Vienna3.3.0_beta4.5b272a6-dSYM.tgz`)
    5. For beta and release candidates, check the "This is a prerelease" box.
    6. Click the "Publish" button.
    7. Verify the uploaded app: download it, uncompress it and check that it runs OK.
@@ -118,7 +112,7 @@ There are two distinct ways to get the different files needed to publish an upda
 ### On Sourceforge.net:
 
    12. Check that the SourceForge Downloads page for Vienna at <https://sourceforge.net/projects/vienna-rss/files/> got the new files.
-   13. For stable releases only : from the Sourceforge site, choose the ℹ️ button ("View details") of "Vienna3.3.0.tar.gz" (be careful to select the binary and not the code source file or the dSYM file!) and set the file as default download for Mac OS X. Don't do this for beta releases!
+   13. For stable releases only : from the Sourceforge site, choose the ℹ️ button ("View details") of "Vienna3.3.0.tgz" (be careful to select the binary and not the code source file or the dSYM file!) and set the file as default download for Mac OS X. Don't do this for beta releases!
 
 ### On viennarss.github.io
 
@@ -128,20 +122,10 @@ There are two distinct ways to get the different files needed to publish an upda
 
 ### On Brew Cask
 
-17. __For stable releases only :__ follow the steps listed below, adapted from the [Brew Cask Wiki](https://github.com/caskroom/homebrew-cask/blob/master/CONTRIBUTING.md#updating-a-cask):
+17. __Optional and for stable releases only :__ submit the version to Homebrew Casks with a command similar to this one:
 
->We have a [script](https://github.com/vitorgalvao/tiny-scripts/blob/master/cask-repair) that will ask for the new version number, and take care of updating the Cask file and submitting a pull request to homebrew-cask:
+````bash
+brew bump-cask-pr vienna --version=3.3.0
+````
 
-```bash
-# install and setup script - only needed once
-brew install vitorgalvao/tiny-scripts/cask-repair
-cask-repair --help
-
-# from time to time (especially on major macOS updates)
-brew upgrade cask-repair
-
-# use to update <outdated_cask>
-cask-repair vienna
-```
-
-Finally, consider posting an announcement of the new release on the CocoaForge Vienna forum at <http://forums.cocoaforge.com/viewforum.php?f=18> and/or <http://vienna-rss.com>.
+Finally, consider posting an announcement of the new release on <https://www.vienna-rss.com>.

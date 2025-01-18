@@ -22,15 +22,12 @@
 #import "ArticleController.h"
 #import "AppController.h"
 #import "ArticleCellView.h"
-#import "ArticleView.h"
 #import "Preferences.h"
 #import "Constants.h"
 #import "StringExtensions.h"
 #import "HelperFunctions.h"
-#import "BrowserPane.h"
 #import "Article.h"
 #import "Folder.h"
-#import "TableViewExtensions.h"
 #import "Database.h"
 #import "Vienna-Swift.h"
 
@@ -40,22 +37,29 @@
 #define DEFAULT_CELL_HEIGHT	300.0
 #define XPOS_IN_CELL	6.0
 #define YPOS_IN_CELL	2.0
-#define PROGRESS_INDICATOR_DIMENSION 16
 
-@interface UnifiedDisplayView ()
+static void *VNAUnifiedDisplayViewObserverContext = &VNAUnifiedDisplayViewObserverContext;
+
+@interface UnifiedDisplayView () <CustomWKHoverUIDelegate>
 
 @property (nonatomic) OverlayStatusBar *statusBar;
 
 -(void)initTableView;
--(void)handleReadingPaneChange:(NSNotificationCenter *)nc;
--(void)handleCellDidResize:(NSNotificationCenter *)nc;
+-(void)handleReadingPaneChange:(NSNotification *)notification;
+-(void)handleCellDidResize:(NSNotification *)notification;
 -(BOOL)viewNextUnreadInCurrentFolder:(NSInteger)currentRow;
 -(void)markCurrentRead:(NSTimer *)aTimer;
 -(void)makeRowSelectedAndVisible:(NSInteger)rowIndex;
 
 @end
 
-@implementation UnifiedDisplayView
+@implementation UnifiedDisplayView {
+    IBOutlet ExtendedTableView *articleList;
+
+    NSTimer *markReadTimer;
+
+    NSMutableArray *rowHeightArray;
+}
 
 #pragma mark -
 #pragma mark Init/Dealloc
@@ -66,8 +70,7 @@
 -(instancetype)initWithFrame:(NSRect)frame
 {
     self= [super initWithFrame:frame];
-    if (self)
-	{
+    if (self) {
 		markReadTimer = nil;
 		rowHeightArray = [[NSMutableArray alloc] init];
     }
@@ -81,8 +84,9 @@
 {
 	// Register for notification
 	NSNotificationCenter * nc = [NSNotificationCenter defaultCenter];
-	[nc addObserver:self selector:@selector(handleReadingPaneChange:) name:@"MA_Notify_ReadingPaneChange" object:nil];
-	[nc addObserver:self selector:@selector(handleCellDidResize:) name:@"MA_Notify_CellResize" object:nil];
+	[nc addObserver:self selector:@selector(handleReadingPaneChange:) name:MA_Notify_ReadingPaneChange object:nil];
+	[nc addObserver:self selector:@selector(handleStyleChange:) name:MA_Notify_StyleChange object:nil];
+	[nc addObserver:self selector:@selector(handleCellDidResize:) name:MA_Notify_CellResize object:nil];
 
     [self initTableView];
 }
@@ -98,7 +102,11 @@
 
 	NSMenu * articleListMenu = [[NSMenu alloc] init];
 
-	[articleListMenu addItemWithTitle:NSLocalizedString(@"Mark Read", @"Title of a menu item")
+	[articleListMenu addItemWithTitle:NSLocalizedStringWithDefaultValue(@"markRead.menuItem",
+																		nil,
+																		NSBundle.mainBundle,
+																		@"Mark Read",
+																		@"Title of a menu item")
 							   action:@selector(markRead:)
 						keyEquivalent:@""];
 	[articleListMenu addItemWithTitle:NSLocalizedString(@"Mark Unread", @"Title of a menu item")
@@ -146,7 +154,7 @@
     [NSUserDefaults.standardUserDefaults addObserver:self
                                           forKeyPath:MAPref_ShowStatusBar
                                              options:NSKeyValueObservingOptionInitial
-                                             context:nil];
+                                             context:VNAUnifiedDisplayViewObserverContext];
 }
 
 /* dealloc
@@ -155,16 +163,17 @@
 -(void)dealloc
 {
     [NSUserDefaults.standardUserDefaults removeObserver:self
-                                             forKeyPath:MAPref_ShowStatusBar];
+                                             forKeyPath:MAPref_ShowStatusBar
+                                                context:VNAUnifiedDisplayViewObserverContext];
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
 	[articleList setDataSource:nil];
 	[articleList setDelegate:nil];
 	[rowHeightArray removeAllObjects];
 }
 
-- (void)handleCellDidResize:(NSNotification *)nc
+- (void)handleCellDidResize:(NSNotification *)notification
 {
-    ArticleCellView * cell = nc.object;
+    ArticleCellView * cell = notification.object;
     NSUInteger row = cell.articleRow;
     CGFloat fittingHeight = cell.fittingHeight;
     if (row < rowHeightArray.count) {
@@ -180,190 +189,7 @@
     [cell setInProgress:NO];
 }
 
-#pragma mark -
-#pragma mark WebUIDelegate
-
-/* createWebViewWithRequest
- * Called when the browser wants to create a new window. The request is opened in a new tab.
- */
--(WebView *)webView:(WebView *)sender createWebViewWithRequest:(NSURLRequest *)request
-{
-	[self.controller openURL:request.URL inPreferredBrowser:YES];
-	// Change this to handle modifier key?
-	// Is this covered by the webView policy?
-	[NSApp.mainWindow makeFirstResponder:self];
-	return nil;
-}
-
-/* runJavaScriptAlertPanelWithMessage
- * Called when the browser wants to display a JavaScript alert panel containing the specified message.
- */
-- (void)webView:(WebView *)sender runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WebFrame *)frame {
-    NSAlert *alert = [NSAlert new];
-    alert.alertStyle = NSAlertStyleInformational;
-    alert.messageText = NSLocalizedString(@"JavaScript", @"");
-    alert.informativeText = message;
-    [alert runModal];
-}
-
-/* runJavaScriptConfirmPanelWithMessage
- * Called when the browser wants to display a JavaScript confirmation panel with the specified message.
- */
-- (BOOL)webView:(WebView *)sender runJavaScriptConfirmPanelWithMessage:(NSString *)message initiatedByFrame:(WebFrame *)frame {
-    NSAlert *alert = [NSAlert new];
-    alert.alertStyle = NSAlertStyleInformational;
-    alert.messageText = NSLocalizedString(@"JavaScript", @"");
-    alert.informativeText = message;
-    [alert addButtonWithTitle:NSLocalizedString(@"OK", @"Title of a button on an alert")];
-    [alert addButtonWithTitle:NSLocalizedString(@"Cancel", @"Title of a button on an alert")];
-    NSModalResponse alertResponse = [alert runModal];
-
-	return alertResponse == NSAlertFirstButtonReturn;
-}
-
-/* mouseDidMoveOverElement
- * Called from the webview when the user positions the mouse over an element. If it's a link
- * then echo the URL to the status bar like Safari does.
- */
-- (void)webView:(WebView *)sender mouseDidMoveOverElement:(NSDictionary *)elementInformation
-  modifierFlags:(NSUInteger)modifierFlags {
-    if (self.statusBar) {
-        NSURL *url = [elementInformation valueForKey:@"WebElementLinkURL"];
-        self.statusBar.label = url.absoluteString;
-    }
-}
-
-/* contextMenuItemsForElement
- * Creates a new context menu for our article's web view.
- */
--(NSArray *)webView:(WebView *)sender contextMenuItemsForElement:(NSDictionary *)element defaultMenuItems:(NSArray *)defaultMenuItems
-{
-	// If this is an URL link, do the link-specific items.
-	NSURL * urlLink = [element valueForKey:WebElementLinkURLKey];
-	if (urlLink != nil)
-		return [self.controller contextMenuItemsForElement:element defaultMenuItems:defaultMenuItems];
-
-	NSMutableArray * newDefaultMenu = [[NSMutableArray alloc] init];
-	NSInteger count = defaultMenuItems.count;
-	NSInteger index;
-
-	// Copy over everything but the reload menu item, which we can't handle if
-	// this is not a full HTML page since we don't have an URL.
-	for (index = 0; index < count; index++)
-	{
-		NSMenuItem * menuItem = defaultMenuItems[index];
-		if (menuItem.tag != WebMenuItemTagReload)
-			[newDefaultMenu addObject:menuItem];
-	}
-
-	// If we still have some useful menu items (other than Webkit's Web Inspector)
-	// then use them for the new default menu
-	if (newDefaultMenu.count > 0 && ![newDefaultMenu[0] isSeparatorItem])
-		defaultMenuItems = [newDefaultMenu copy];
-	// otherwise set the default items to nil as we may have removed all the items.
-	else
-	{
-		defaultMenuItems = nil;
-	}
-
-	// Return the default menu items.
-    return defaultMenuItems;
-}
-
-#pragma mark -
-#pragma mark WebFrameLoadDelegate
-
-/* didFailLoadWithError
- * Invoked when a location request for frame has failed to load.
- */
--(void)webView:(WebView *)sender didFailLoadWithError:(NSError *)error forFrame:(WebFrame *)webFrame
-{
-	// Not really errors. Load is cancelled or a plugin is grabbing the URL and will handle it by itself.
-	if (!([error.domain isEqualToString:WebKitErrorDomain] && (error.code == NSURLErrorCancelled || error.code == WebKitErrorPlugInWillHandleLoad)))
-	{
-		id obj = sender.superview;
-		if ([obj isKindOfClass:[ArticleCellView class]])
-		{
-			ArticleCellView * cell = (ArticleCellView *)obj;
-			[cell setInProgress:NO];
-			NSUInteger row= cell.articleRow;
-			NSArray * allArticles = self.controller.articleController.allArticles;
-			if (row < (NSInteger)allArticles.count)
-			{
-				[articleList reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
-			}
-		}
-		else
-			// TODO : what should we do ?
-			NSLog(@"Webview error %@ associated to object of class %@", error, [obj class]);
-	}
-}
-
-- (void)webView:(WebView *)sender didFinishLoadForFrame:(WebFrame *)webFrame
-{
-    id obj = sender.superview;
-    if ([obj isKindOfClass:[ArticleCellView class]]) {
-        ArticleCellView *cell = (ArticleCellView *)obj;
-        [cell setInProgress:NO];
-    }
-}
-
-#pragma mark -
-#pragma mark webView progress notifications
-
-/* webViewLoadFinished
- * Invoked when a web view load has finished
- * (called via a WebViewProgressFinishedNotification notification)
- */
-- (void)webViewLoadFinished:(NSNotification *)notification
-{
-    id obj = notification.object;
-    if([obj isKindOfClass:[ArticleView class]])
-    {
-		ArticleView * sender = (ArticleView *)obj;
-		id objView = sender.superview;
-		if ([objView isKindOfClass:[ArticleCellView class]])
-		{
-			ArticleCellView * cell = (ArticleCellView *)objView;
-			NSUInteger row= [articleList rowForView:objView];
-			if (row == cell.articleRow && row < self.controller.articleController.allArticles.count
-			  && cell.folderId == [self.controller.articleController.allArticles[row] folderId])
-			{	//relevant cell
-                NSString* offsetHeight;
-                CGFloat fittingHeight;
-
-                [sender forceJavascript];
-                offsetHeight = [sender stringByEvaluatingJavaScriptFromString:@"document.documentElement.offsetHeight"];
-                [sender useUserPrefsForJavascript];
-                fittingHeight = offsetHeight.doubleValue;
-                //get the rect of the current webview frame
-                NSRect webViewRect = sender.frame;
-                //calculate the new frame
-                NSRect newWebViewRect = NSMakeRect(0,
-                                           0,
-                                           NSWidth(webViewRect),
-                                           fittingHeight);
-                //set the new frame to the webview
-                sender.frame = newWebViewRect;
-                cell.fittingHeight = fittingHeight;
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_CellResize" object:cell];
-            }
-            else {	//non relevant cell
-                [cell setInProgress:NO];
-                if (row < self.controller.articleController.allArticles.count)
-                {
-                    [articleList reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
-                }
-            }
-		} else {
-			// not an ArticleCellView anymore
-			// ???
-		}
-	}
-}
-
-#pragma mark -
-#pragma ArticleBaseView delegate
+#pragma mark - ArticleBaseView delegate
 
 /* ensureSelectedArticle
  * Ensure that there is a selected article and that it is visible.
@@ -382,18 +208,17 @@
  */
 -(void)scrollToArticle:(NSString *)guid
 {
-	if (guid != nil)
-	{
+	if (guid != nil) {
 		NSInteger rowIndex = 0;
-		for (Article * thisArticle in self.controller.articleController.allArticles)
-		{
-			if ([thisArticle.guid isEqualToString:guid])
-			{
+		for (Article * thisArticle in self.controller.articleController.allArticles) {
+			if ([thisArticle.guid isEqualToString:guid]) {
 				[self makeRowSelectedAndVisible:rowIndex];
 				return;
 			}
 			++rowIndex;
 		}
+	} else {
+		[articleList scrollRowToVisible:0];
 	}
 
 	[articleList deselectAll:self];
@@ -418,17 +243,17 @@
 	[self.controller.articleController reloadArrayOfArticles];
 
 	// make sure to not change the mark read while searching
-    if (articleList.selectedRow < 0 && self.controller.articleController.allArticles.count > 0 )
-	{
+    if (articleList.selectedRow < 0 && self.controller.articleController.allArticles.count > 0 ) {
 		BOOL shouldSelectArticle = YES;
-		if ([Preferences standardPreferences].markReadInterval > 0.0f)
-		{
+		if ([Preferences standardPreferences].markReadInterval > 0.0f) {
 			Article * article = self.controller.articleController.allArticles[0u];
-			if (!article.read)
+			if (!article.read) {
 				shouldSelectArticle = NO;
+			}
 		}
-		if (shouldSelectArticle)
+		if (shouldSelectArticle) {
 			[self makeRowSelectedAndVisible:0];
+		}
 	}
 }
 
@@ -513,12 +338,21 @@
 /* handleReadingPaneChange
  * Respond to the change to the reading pane orientation.
  */
--(void)handleReadingPaneChange:(NSNotificationCenter *)nc
+-(void)handleReadingPaneChange:(NSNotification *)notification
 {
-	if (self == self.controller.articleController.mainArticleView)
-	{
+	if (self == self.controller.articleController.mainArticleView) {
 		[articleList reloadData];
 	}
+}
+
+/* handleStyleChange
+ * Respond to an article style change
+ */
+-(void)handleStyleChange:(NSNotification *)notification
+{
+    if (self == self.controller.articleController.mainArticleView) {
+        [articleList performSelector:@selector(reloadData) withObject:nil afterDelay:0.0];
+    }
 }
 
 /* makeRowSelectedAndVisible
@@ -527,12 +361,9 @@
  */
 -(void)makeRowSelectedAndVisible:(NSInteger)rowIndex
 {
-	if (self.controller.articleController.allArticles.count == 0u)
-	{
+	if (self.controller.articleController.allArticles.count == 0u) {
 		[articleList deselectAll:self];
-	}
-	else
-	{
+	} else {
 		[articleList selectRowIndexes:[NSIndexSet indexSetWithIndex:rowIndex] byExtendingSelection:NO];
 		[articleList scrollRowToVisible:rowIndex];
 	}
@@ -553,17 +384,16 @@
  */
 -(BOOL)viewNextUnreadInCurrentFolder:(NSInteger)currentRow
 {
-	if (currentRow < 0)
+	if (currentRow < 0) {
 		currentRow = 0;
+	}
 
 	NSArray * allArticles = self.controller.articleController.allArticles;
 	NSInteger totalRows = allArticles.count;
 	Article * theArticle;
-	while (currentRow < totalRows)
-	{
+	while (currentRow < totalRows) {
 		theArticle = allArticles[currentRow];
-		if (!theArticle.read)
-		{
+		if (!theArticle.read) {
 			[self makeRowSelectedAndVisible:currentRow];
 			return YES;
 		}
@@ -579,11 +409,11 @@
 -(BOOL)selectFirstUnreadInFolder
 {
 	BOOL result = [self viewNextUnreadInCurrentFolder:-1];
-	if (!result)
-	{
+	if (!result) {
 		NSInteger count = self.controller.articleController.allArticles.count;
-		if (count > 0)
+		if (count > 0) {
 			[self makeRowSelectedAndVisible:0];
+		}
 	}
 	return result;
 }
@@ -622,15 +452,6 @@
     }
 }
 
-/* viewLink
- * There's no view link address for article views. If we eventually implement a local
- * scheme such as vienna:<feedurl>/<guid> then we could use that as a link address.
- */
--(NSString *)viewLink
-{
-	return nil;
-}
-
 /* refreshFolder
  * Refreshes the current folder by applying the current sort or thread
  * logic and redrawing the article list. The selected article is preserved
@@ -640,8 +461,7 @@
 {
     Article * currentSelectedArticle = self.selectedArticle;
 
-    switch (refreshFlag)
-    {
+    switch (refreshFlag) {
         case VNARefreshRedrawList:
             break;
         case VNARefreshReapplyFilter:
@@ -657,41 +477,13 @@
     [self scrollToArticle:currentSelectedArticle.guid];
 }
 
-/* startLoadIndicator
- * add the indicator of articles' data being loaded
- */
--(void)startLoadIndicator
-{
-	if (progressIndicator == nil)
-	{
-		NSRect progressIndicatorFrame;
-		progressIndicatorFrame.size = NSMakeSize(articleList.visibleRect.size.width, PROGRESS_INDICATOR_DIMENSION);
-		progressIndicatorFrame.origin = articleList.visibleRect.origin;
-		progressIndicator = [[NSProgressIndicator alloc] initWithFrame:progressIndicatorFrame];
-		progressIndicator.displayedWhenStopped = NO;
-		[articleList addSubview:progressIndicator];
-	}
-	[progressIndicator startAnimation:self];
-}
-
-/* stopLoadIndicator
- * remove the indicator of articles loading
- */
--(void)stopLoadIndicator
-{
-	[progressIndicator stopAnimation:self];
-	[progressIndicator removeFromSuperviewWithoutNeedingDisplay];
-	progressIndicator = nil;
-}
-
 /* markCurrentRead
  * Mark the current article as read.
  */
 -(void)markCurrentRead:(NSTimer *)aTimer
 {
 	Article * theArticle = self.selectedArticle;
-	if (theArticle != nil && !theArticle.read && ![Database sharedManager].readOnly)
-	{
+	if (theArticle != nil && !theArticle.read && ![Database sharedManager].readOnly) {
 		[self.controller.articleController markReadByArray:@[theArticle] readFlag:YES];
 	}
 }
@@ -710,16 +502,13 @@
 
 - (CGFloat)tableView:(NSTableView *)aListView heightOfRow:(NSInteger)row
 {
-	if (row >= rowHeightArray.count)
-	{
+	if (row >= rowHeightArray.count) {
 		NSInteger toAdd = row - rowHeightArray.count + 1 ;
 		for (NSInteger i = 0 ; i < toAdd ; i++) {
 			[rowHeightArray addObject:@(0)];
 		}
 		return (CGFloat)DEFAULT_CELL_HEIGHT;
-	}
-	else
-	{
+	} else {
 		id object= rowHeightArray[row];
         CGFloat height = [object doubleValue];
         if (height > 0) {
@@ -735,13 +524,13 @@
  */
 - (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
 {
-	if (![tableView isEqualTo:articleList])
+	if (![tableView isEqualTo:articleList]) {
 		return nil;
+	}
 
 	ArticleCellView *cellView = (ArticleCellView*)[tableView makeViewWithIdentifier:LISTVIEW_CELL_IDENTIFIER owner:self];
 
-	if (cellView == nil)
-	{
+	if (cellView == nil) {
 		cellView = [[ArticleCellView alloc] initWithFrame:NSMakeRect(
 		        XPOS_IN_CELL, YPOS_IN_CELL, tableView.bounds.size.width - XPOS_IN_CELL, DEFAULT_CELL_HEIGHT)];
 		cellView.identifier = LISTVIEW_CELL_IDENTIFIER;
@@ -752,8 +541,9 @@
 	}
 
 	NSArray * allArticles = self.controller.articleController.allArticles;
-	if (row < 0 || row >= allArticles.count)
+	if (row < 0 || row >= allArticles.count) {
 	    return nil;
+	}
 
 	Article * theArticle = allArticles[row];
 	NSInteger articleFolderId = theArticle.folderId;
@@ -763,13 +553,8 @@
 	cellView.listView = articleList;
 	NSObject<ArticleContentView> *articleContentView = cellView.articleView;
     NSView *view;
-    if ([articleContentView isKindOfClass:WebKitArticleView.class])
-    {
-        view = (WebKitArticleView *)articleContentView;
-        ((CustomWKWebView *)view).hoverListener = self;
-    } else {
-        view = ((ArticleView *) articleContentView);
-    }
+    view = (WebKitArticleView *)articleContentView;
+    ((CustomWKWebView *)view).hoverUiDelegate = self;
 	[view removeFromSuperviewWithoutNeedingDisplay];
 	view.frame = cellView.frame;
 	[cellView addSubview:view];
@@ -785,11 +570,9 @@
 -(void)tableView:(ExtendedTableView *)tableView menuWillAppear:(NSEvent *)theEvent
 {
 	NSInteger row = [articleList rowAtPoint:[articleList convertPoint:theEvent.locationInWindow fromView:nil]];
-	if (row >= 0)
-	{
+	if (row >= 0) {
 		// Select the row under the cursor if it isn't already selected
-		if (articleList.numberOfSelectedRows <= 1)
-		{
+		if (articleList.numberOfSelectedRows <= 1) {
 			[articleList selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
 		}
 	}
@@ -832,20 +615,17 @@
 	// Set up the pasteboard
 	[pboard declareTypes:@[VNAPasteboardTypeRSSItem, VNAPasteboardTypeWebURLsWithTitles, NSPasteboardTypeString, NSPasteboardTypeHTML] owner:self];
     if (count == 1) {
-        if (@available(macOS 10.13, *)) {
-            [pboard addTypes:@[VNAPasteboardTypeURL, VNAPasteboardTypeURLName, NSPasteboardTypeURL] owner:self];
-        } else {
-            [pboard addTypes:@[VNAPasteboardTypeURL, VNAPasteboardTypeURLName, NSURLPboardType] owner:self];
-        }
+        [pboard addTypes:@[NSPasteboardTypeURL, VNAPasteboardTypeURLName]
+                   owner:self];
     }
 
 	// Open the HTML string
-	[fullHTMLText appendString:@"<html><body>"];
+	[fullHTMLText appendString:@"<html style=\"font-family:sans-serif;\">"
+                                "<head><meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\"></head><body>"];
 
 	// Get all the articles that are being dragged
 	NSUInteger msgIndex = rowIndexes.firstIndex;
-	while (msgIndex != NSNotFound)
-	{
+	while (msgIndex != NSNotFound) {
 		Article * thisArticle = self.controller.articleController.allArticles[msgIndex];
 		Folder * folder = [db folderFromID:thisArticle.folderId];
 		NSString * msgText = thisArticle.body;
@@ -865,14 +645,14 @@
 		[arrayOfArticles addObject:articleDict];
 
 		// Plain text
-		[fullPlainText appendFormat:@"%@\n%@\n\n", msgTitle, msgText];
+        [fullPlainText appendFormat:@"%@\n%@\n\n", msgTitle, thisArticle.summary];
 
 		// Add HTML version too.
-		[fullHTMLText appendFormat:@"<a href=\"%@\">%@</a><br />%@<br /><br />", msgLink, msgTitle, msgText];
+		[fullHTMLText appendFormat:@"<div class=\"info\"><a href=\"%@\">%@</a><div>"
+                                    "<div class=\"articleBodyStyle\">%@</div><br>", msgLink, msgTitle, msgText];
 
-		if (count == 1)
-		{
-			[pboard setString:msgLink forType:VNAPasteboardTypeURL];
+		if (count == 1) {
+			[pboard setString:msgLink forType:NSPasteboardTypeURL];
 			[pboard setString:msgTitle forType:VNAPasteboardTypeURLName];
 
 			// Write the link to the pastboard.
@@ -926,16 +706,13 @@
  */
 -(BOOL)validateMenuItem:(NSMenuItem *)menuItem
 {
-	if (menuItem.action == @selector(copy:))
-	{
+	if (menuItem.action == @selector(copy:)) {
 		return (articleList.numberOfSelectedRows > 0);
 	}
-	if (menuItem.action == @selector(delete:))
-	{
+	if (menuItem.action == @selector(delete:)) {
         return [self canDeleteMessageAtRow:articleList.selectedRow];
 	}
-	if (menuItem.action == @selector(selectAll:))
-	{
+	if (menuItem.action == @selector(selectAll:)) {
 		return YES;
 	}
 	return NO;
@@ -947,14 +724,12 @@
 -(NSArray *)markedArticleRange
 {
 	NSMutableArray * articleArray = nil;
-	if (articleList.selectedRowIndexes.count > 0)
-	{
+	if (articleList.selectedRowIndexes.count > 0) {
 		NSIndexSet * rowIndexes = articleList.selectedRowIndexes;
 		NSUInteger  rowIndex = rowIndexes.firstIndex;
 
 		articleArray = [NSMutableArray arrayWithCapacity:rowIndexes.count];
-		while (rowIndex != NSNotFound)
-		{
+		while (rowIndex != NSNotFound) {
 			[articleArray addObject:self.controller.articleController.allArticles[rowIndex]];
 			rowIndex = [rowIndexes indexGreaterThanIndex:rowIndex];
 		}
@@ -973,12 +748,9 @@
 -(BOOL)becomeFirstResponder
 {
     NSInteger currentSelectedRow = articleList.selectedRow;
-	if (currentSelectedRow >= 0 && currentSelectedRow < self.controller.articleController.allArticles.count)
-    {
+	if (currentSelectedRow >= 0 && currentSelectedRow < self.controller.articleController.allArticles.count) {
 		[articleList selectRowIndexes:[NSIndexSet indexSetWithIndex:currentSelectedRow] byExtendingSelection:NO];
-    }
-    else if (self.controller.articleController.allArticles.count != 0u)
-    {
+    } else if (self.controller.articleController.allArticles.count != 0u) {
 		[articleList selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
     }
 	[NSApp.mainWindow makeFirstResponder:articleList];
@@ -991,11 +763,11 @@
  */
 -(void)keyDown:(NSEvent *)theEvent
 {
-	if (theEvent.characters.length == 1)
-	{
+	if (theEvent.characters.length == 1) {
 		unichar keyChar = [theEvent.characters characterAtIndex:0];
-		if ([self.controller handleKeyDown:keyChar withFlags:theEvent.modifierFlags])
+		if ([self.controller handleKeyDown:keyChar withFlags:theEvent.modifierFlags]) {
 			return;
+		}
 	}
 	[self interpretKeyEvents:@[theEvent]];
 }
@@ -1005,12 +777,21 @@
 - (void)observeValueForKeyPath:(NSString *)keyPath
                       ofObject:(id)object
                         change:(NSDictionary<NSKeyValueChangeKey,id> *)change
-                       context:(void *)context {
+                       context:(void *)context
+{
+    if (context != VNAUnifiedDisplayViewObserverContext) {
+        [super observeValueForKeyPath:keyPath
+                             ofObject:object
+                               change:change
+                              context:context];
+        return;
+    }
+
     if ([keyPath isEqualToString:MAPref_ShowStatusBar]) {
         BOOL isStatusBarShown = [Preferences standardPreferences].showStatusBar;
         if (isStatusBarShown && !self.statusBar) {
             self.statusBar = [OverlayStatusBar new];
-            [articleList.enclosingScrollView addSubview:self.statusBar];
+            [self addSubview:self.statusBar];
         } else if (!isStatusBarShown && self.statusBar) {
             [self.statusBar removeFromSuperview];
             self.statusBar = nil;
@@ -1018,15 +799,10 @@
     }
 }
 
-// MARK: WKScriptMessageHandler
+// MARK: CustomWKHoverUIDelegate
 
-- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message
-{
-    if ([message.name isEqualToString:CustomWKWebView.mouseDidEnterName]) {
-        NSString * link = (NSString *)message.body;
-        self.statusBar.label = link;
-    } else if ([message.name isEqualToString:CustomWKWebView.mouseDidExitName]) {
-        self.statusBar.label = nil;
-    }
+-(void)hoveredWithLink:(NSString *)link {
+    self.statusBar.label = link;
 }
+
 @end

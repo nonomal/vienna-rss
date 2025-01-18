@@ -22,14 +22,16 @@
 
 #import "Article.h"
 
-@implementation ArticleReference
+@implementation ArticleReference {
+    NSString *guid;
+    NSInteger folderId;
+}
 
 /* initWithReference
  */
 -(instancetype)initWithReference:(NSString *)aGuid inFolder:(NSInteger)aFolderId
 {
-	if ((self = [super init]) != nil)
-	{
+	if ((self = [super init]) != nil) {
 		guid = aGuid;
 		folderId = aFolderId;
 	}

@@ -21,6 +21,7 @@
 @import Cocoa;
 
 @class Article;
+@class ArticleReference;
 
 /**
  Folder types
@@ -68,12 +69,7 @@ typedef NS_OPTIONS(NSUInteger, VNAFolderFlag) {
     VNAFolderFlagBuggySync       = 1 << 7
 };
 
-@interface Folder : NSObject <NSCacheDelegate> {
-	NSInteger unreadCount;
-	NSInteger childUnreadCount;
-    VNAFolderFlag nonPersistedFlags;
-    VNAFolderFlag flags;
-}
+@interface Folder : NSObject <NSCacheDelegate>
 
 // Initialisation functions
 -(instancetype)initWithId:(NSInteger)itemId parentId:(NSInteger)parentId name:(NSString *)name type:(VNAFolderType)type /*NS_DESIGNATED_INITIALIZER*/;
@@ -81,7 +77,7 @@ typedef NS_OPTIONS(NSUInteger, VNAFolderFlag) {
 @property (nonatomic, copy) NSString *feedDescription;
 @property (nonatomic, copy) NSString *homePage;
 @property (nonatomic, copy) NSString *feedURL;
-@property (nonatomic, copy) NSDate *lastUpdate;
+@property (nonatomic) NSDate *lastUpdate;
 @property (nonatomic, copy) NSString *lastUpdateString;
 @property (nonatomic, copy) NSString *username;
 @property (nonatomic, copy) NSString *password;
@@ -92,15 +88,15 @@ typedef NS_OPTIONS(NSUInteger, VNAFolderFlag) {
 @property (nonatomic) NSInteger parentId;
 @property (nonatomic) NSInteger nextSiblingId;
 @property (nonatomic) NSInteger firstChildId;
-@property (readonly) NSInteger countOfCachedArticles;
-@property NSInteger unreadCount;
+@property (readonly, nonatomic) NSInteger countOfCachedArticles;
+@property (nonatomic) NSInteger unreadCount;
 @property (nonatomic) VNAFolderType type;
 @property (nonatomic, readonly) VNAFolderFlag nonPersistedFlags;
 @property (nonatomic, readonly) VNAFolderFlag flags;
 @property (nonatomic, copy) NSImage *image;
 @property (nonatomic, readonly) BOOL hasCachedImage;
 -(NSImage *)standardImage;
-@property NSInteger childUnreadCount;
+@property (nonatomic) NSInteger childUnreadCount;
 -(void)clearCache;
 @property (nonatomic, getter=isGroupFolder, readonly) BOOL groupFolder;
 @property (nonatomic, getter=isSmartFolder, readonly) BOOL smartFolder;
@@ -117,11 +113,12 @@ typedef NS_OPTIONS(NSUInteger, VNAFolderFlag) {
 -(void)clearNonPersistedFlag:(VNAFolderFlag)flagToClear;
 -(NSUInteger)indexOfArticle:(Article *)article;
 -(Article *)articleFromGuid:(NSString *)guid;
+-(NSInteger)retrieveKnownStatusForGuid:(NSString *)guid;
 -(BOOL)createArticle:(Article *)article guidHistory:(NSArray *)guidHistory;
 -(void)removeArticleFromCache:(NSString *)guid;
--(void)restoreArticleToCache:(Article *)article;
 -(void)markArticlesInCacheRead;
--(NSArray *)arrayOfUnreadArticlesRefs;
+-(void)resetArticleStatuses;
+-(NSArray<ArticleReference *> *)arrayOfUnreadArticlesRefs;
 -(NSComparisonResult)folderNameCompare:(Folder *)otherObject;
 -(NSComparisonResult)folderIDCompare:(Folder *)otherObject;
 @property (readonly, nonatomic) NSString *feedSourceFilePath;

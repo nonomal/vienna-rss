@@ -18,45 +18,29 @@
 // 
 
 #import "HelperFunctions.h"
+@import WebKit;
 
-/* hasOSScriptsMenu
- * Determines whether the OS script menu is present or not.
- */
+// Determines whether the system-wide script menu is present. This is usually
+// not enabled by default and must be enabled in Script Editor's preferences.
+// This requires the com.apple.security.temporary-exception.shared-preference.*
+// codesigning entitlement with the appropriate keys.
 BOOL hasOSScriptsMenu(void)
 {
-    NSFileManager *fileManager = NSFileManager.defaultManager;
-    NSURL *libraryURL = [fileManager URLForDirectory:NSLibraryDirectory
-                                            inDomain:NSUserDomainMask
-                                   appropriateForURL:nil
-                                              create:NO
-                                               error:nil];
-    NSURL *prefsURL = [libraryURL URLByAppendingPathComponent:@"Preferences"
-                                                  isDirectory:YES];
-
+    NSUserDefaults *userDefaults;
     if (@available(macOS 10.14, *)) {
-        NSString *fileName = @"com.apple.scriptmenu.plist";
-        NSURL *fileURL = [prefsURL URLByAppendingPathComponent:fileName
-                                                   isDirectory:NO];
-        NSError *error = nil;
-        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfURL:fileURL
-                                                                  error:&error];
-        if (!prefs && error) {
-            NSLog(@"%@", error);
-        }
-
-        NSNumber *pref = prefs[@"ScriptMenuEnabled"];
-        return pref.boolValue;
+        // If the following lines are removed, remember to also remove the
+        // above-mentioned entitlement for "com.apple.scriptmenu".
+        NSString *bundleID = @"com.apple.scriptmenu";
+        userDefaults = [[NSUserDefaults alloc] initWithSuiteName:bundleID];
+        // -boolForKey returns NO if the key is not present. The same applies
+        // if NSUserDefaults could not be initialized.
+        return [userDefaults boolForKey:@"ScriptMenuEnabled"];
     } else {
-        NSString *fileName = @"com.apple.systemuiserver.plist";
-        NSURL *fileURL = [prefsURL URLByAppendingPathComponent:fileName
-                                                   isDirectory:NO];
-
-        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfURL:fileURL];
-        if (!prefs) {
-            NSLog(@"File %@ not present, not accessible or invalid", fileURL.path);
-        }
-
-        NSArray *menuExtras = prefs[@"menuExtras"];
+        // If the following lines are removed, remember to also remove the
+        // above-mentioned entitlement for "com.apple.systemuiserver".
+        NSString *bundleID = @"com.apple.systemuiserver";
+        userDefaults = [[NSUserDefaults alloc] initWithSuiteName:bundleID];
+        NSArray *menuExtras = [userDefaults arrayForKey:@"menuExtras"];
         for (NSUInteger index = 0; index < menuExtras.count; ++index) {
             if ([menuExtras[index] hasSuffix:@"Script Menu.menu"]) {
                 return YES;
@@ -87,12 +71,12 @@ NSMenuItem * menuItemWithAction(SEL theSelector)
 	NSInteger count = arrayOfMenus.count;
 	NSInteger index;
 
-	for (index = 0; index < count; ++index)
-	{
+	for (index = 0; index < count; ++index) {
 		NSMenu * subMenu = [arrayOfMenus[index] submenu];
 		NSInteger itemIndex = [subMenu indexOfItemWithTarget:NSApp.delegate andAction:theSelector];
-		if (itemIndex >= 0)
+		if (itemIndex >= 0) {
 			return [subMenu itemAtIndex:itemIndex];
+		}
 	}
 	return nil;
 }
@@ -134,20 +118,27 @@ NSURL *_Nullable urlFromUserString(NSString *_Nonnull urlString)
         urlComponents.percentEncodedPath = path;
         url = urlComponents.URL;
     } else {
-        // Use WebKit to clean up user-entered URLs that might contain umlauts,
-        // diacritics and other IDNA related stuff in the domain, or whatever
-        // may hide in filenames and arguments.
-        NSPasteboard *pasteboard = [NSPasteboard pasteboardWithUniqueName];
-        [pasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
-        @try {
-            if ([pasteboard setString:urlString
-                              forType:NSPasteboardTypeString]) {
-                url = [WebView URLFromPasteboard:pasteboard];
+        if (@available(macOS 13, *)) {
+            url = nil;
+        } else {
+            // On macOS < 13, NSURLComponents is less capable. When it fails, we
+            // use WebKit to clean up user-entered URLs that might contain umlauts,
+            // diacritics and other IDNA related stuff in the domain, or whatever
+            // may hide in filenames and arguments.
+            NSPasteboard *pasteboard = [NSPasteboard pasteboardWithUniqueName];
+            [pasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
+            @try {
+                if ([pasteboard setString:urlString forType:NSPasteboardTypeString]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                    url = [WebView URLFromPasteboard:pasteboard];
+#pragma clang diagnostic pop
+                }
+            } @catch (NSException *exception) {
+                NSLog(@"Failed to convert URL for string %@", urlString);
             }
-        } @catch (NSException *exception) {
-            NSLog(@"Failed to convert URL for string %@", urlString);
+            [pasteboard releaseGlobally];
         }
-        [pasteboard releaseGlobally];
     }
     return url;
 }
@@ -161,20 +152,19 @@ void loadMapFromPath(NSString * path, NSMutableDictionary * pathMappings, BOOL f
 {
 	NSFileManager * fileManager = [NSFileManager defaultManager];
 	NSArray * arrayOfFiles = [fileManager contentsOfDirectoryAtPath:path error:nil];
-	if (arrayOfFiles != nil)
-	{
-		if (validExtensions)
+	if (arrayOfFiles != nil) {
+		if (validExtensions) {
 			arrayOfFiles = [arrayOfFiles pathsMatchingExtensions:validExtensions];
+		}
 		
-		for (NSString * fileName in arrayOfFiles)
-		{
+		for (NSString * fileName in arrayOfFiles) {
 			NSString * fullPath = [path stringByAppendingPathComponent:fileName];
 			BOOL isDirectory;
 			
-			if ([fileManager fileExistsAtPath:fullPath isDirectory:&isDirectory] && (isDirectory == foldersOnly))
-			{
-				if ([fileName isEqualToString:@".DS_Store"])
+			if ([fileManager fileExistsAtPath:fullPath isDirectory:&isDirectory] && (isDirectory == foldersOnly)) {
+				if ([fileName isEqualToString:@".DS_Store"]) {
 					continue;
+				}
 
 				[pathMappings setValue:fullPath forKey:fileName.stringByDeletingPathExtension];
 			}
@@ -194,17 +184,17 @@ BOOL isAccessible(NSString * urlString)
 	NSURL * url = [NSURL URLWithString:urlString];
 
 	target = SCNetworkReachabilityCreateWithName(NULL, url.host.UTF8String);
-    if (target!= nil)
-    {
+    if (target!= nil) {
         ok = SCNetworkReachabilityGetFlags(target, &flags);
         CFRelease(target);
 
-        if (!ok)
+        if (!ok) {
             return NO;
+        }
         return (flags & kSCNetworkReachabilityFlagsReachable) && !(flags & kSCNetworkReachabilityFlagsConnectionRequired);
-    }
-    else
+    } else {
         return NO;
+    }
 }
 
 void runOKAlertPanelPlain(NSString * titleString, NSString * bodyText) {

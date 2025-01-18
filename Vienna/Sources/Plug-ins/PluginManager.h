@@ -22,11 +22,10 @@
 
 @class SearchMethod;
 
-@interface PluginManager : NSObject <NSMenuItemValidation, NSToolbarItemValidation> {
-	NSMutableDictionary * allPlugins;
-}
+@interface PluginManager : NSObject <NSMenuItemValidation, NSToolbarItemValidation>
 
 -(void)resetPlugins;
+@property (class, readonly, nonatomic) NSURL *plugInsDirectoryURL;
 @property (readonly, nonatomic) NSUInteger numberOfPlugins;
 @property (readonly, nonatomic) NSArray<SearchMethod *> *searchMethods;
 @property (readonly, nonatomic) NSArray<NSString *> *toolbarItems;

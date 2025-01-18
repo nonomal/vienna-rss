@@ -20,21 +20,11 @@
 
 @import Foundation;
 
-@class Database;
-@class FeedCredentials;
 @class Folder;
 
-@interface RefreshManager : NSObject <NSURLSessionTaskDelegate> {
-	NSUInteger countOfNewArticles;
-	NSMutableArray * authQueue;
-	FeedCredentials * credentialsController;
-	BOOL hasStarted;
-	NSString * statusMessageDuringRefresh;
-	NSOperationQueue *networkQueue;
-	dispatch_queue_t _queue;
-}
+@interface RefreshManager : NSObject <NSURLSessionTaskDelegate>
 
-@property (class, readonly) RefreshManager *sharedManager;
+@property (class, readonly, nonatomic) RefreshManager *sharedManager;
 
 @property (readonly, copy) NSString *statusMessage;
 @property (nonatomic, getter=isConnecting, readonly) BOOL connecting;

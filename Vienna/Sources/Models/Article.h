@@ -21,48 +21,50 @@
 
 @import Foundation;
 
-extern NSString * _Nonnull MA_Field_GUID;
-extern NSString * _Nullable MA_Field_Subject;
-extern NSString * _Nullable MA_Field_Author;
-extern NSString * _Nullable MA_Field_Link;
-extern NSString * _Nullable MA_Field_Date;
-extern NSString * _Nullable MA_Field_Read;
-extern NSString * _Nullable MA_Field_Flagged;
-extern NSString * _Nullable MA_Field_Comments;
-extern NSString * _Nullable MA_Field_Deleted;
-extern NSString * _Nullable MA_Field_Text;
-extern NSString * _Nullable MA_Field_Folder;
-extern NSString * _Nullable MA_Field_Parent;
-extern NSString * _Nullable MA_Field_Headlines;
-extern NSString * _Nullable MA_Field_Summary;
-extern NSString * _Nullable MA_Field_CreatedDate;
-extern NSString * _Nullable MA_Field_Enclosure;
-extern NSString * _Nullable MA_Field_EnclosureDownloaded;
-extern NSString * _Nullable MA_Field_HasEnclosure;
-
 @class Folder;
 
-// Article field IDs
-typedef NS_ENUM(NSInteger, ArticleFieldID) {
-    ArticleFieldIDGUID = 400,
-    ArticleFieldIDSubject,
-    ArticleFieldIDAuthor,
-    ArticleFieldIDDate,
-    ArticleFieldIDParent,
-    ArticleFieldIDRead,
-    ArticleFieldIDFlagged,
-    ArticleFieldIDText,
-    ArticleFieldIDFolder,
-    ArticleFieldIDLink,
-    ArticleFieldIDComments,
-    ArticleFieldIDHeadlines,
-    ArticleFieldIDDeleted,
-    ArticleFieldIDSummary,
-    ArticleFieldIDCreatedDate, // Not in use?
-    ArticleFieldIDEnclosure,
-    ArticleFieldIDEnclosureDownloaded,
-    ArticleFieldIDHasEnclosure
-};
+NS_ASSUME_NONNULL_BEGIN
+
+extern NSString * const MA_Field_GUID;
+extern NSString * const MA_Field_Subject;
+extern NSString * const MA_Field_Author;
+extern NSString * const MA_Field_Link;
+extern NSString * const MA_Field_LastUpdate;
+extern NSString * const MA_Field_Read;
+extern NSString * const MA_Field_Flagged;
+extern NSString * const MA_Field_Deleted;
+extern NSString * const MA_Field_Text;
+extern NSString * const MA_Field_Folder;
+extern NSString * const MA_Field_Parent;
+extern NSString * const MA_Field_Headlines;
+extern NSString * const MA_Field_Summary;
+extern NSString * const MA_Field_PublicationDate;
+extern NSString * const MA_Field_Enclosure;
+extern NSString * const MA_Field_EnclosureDownloaded;
+extern NSString * const MA_Field_HasEnclosure;
+
+NS_ASSUME_NONNULL_END
+
+typedef NS_ENUM(NSInteger, VNAArticleFieldTag) {
+    VNAArticleFieldTagGUID = 400,
+    VNAArticleFieldTagSubject,
+    VNAArticleFieldTagAuthor,
+    VNAArticleFieldTagLastUpdate,
+    VNAArticleFieldTagParent,
+    VNAArticleFieldTagRead,
+    VNAArticleFieldTagFlagged,
+    VNAArticleFieldTagText,
+    VNAArticleFieldTagFolder,
+    VNAArticleFieldTagLink,
+    /* 410 was previously used */
+    VNAArticleFieldTagHeadlines = 411,
+    VNAArticleFieldTagDeleted,
+    VNAArticleFieldTagSummary,
+    VNAArticleFieldTagPublicationDate,
+    VNAArticleFieldTagEnclosure,
+    VNAArticleFieldTagEnclosureDownloaded,
+    VNAArticleFieldTagHasEnclosure
+} NS_SWIFT_NAME(Article.FieldTag);
 
 typedef NS_ENUM(NSInteger, ArticleStatus) {
     ArticleStatusEmpty = 0,
@@ -70,17 +72,7 @@ typedef NS_ENUM(NSInteger, ArticleStatus) {
     ArticleStatusUpdated
 };
 
-@interface Article : NSObject {
-    NSMutableDictionary * articleData;
-    NSMutableArray * commentsArray;
-    BOOL readFlag;
-    BOOL revisedFlag;
-    BOOL markedFlag;
-    BOOL deletedFlag;
-    BOOL enclosureDownloadedFlag;
-    BOOL hasEnclosureFlag;
-    NSInteger status;
-}
+@interface Article : NSObject
 
 // Accessor functions
 -(instancetype _Nonnull)initWithGuid:(NSString * _Nonnull)theGuid /*NS_DESIGNATED_INITIALIZER*/;
@@ -92,15 +84,14 @@ typedef NS_ENUM(NSInteger, ArticleStatus) {
 @property (nullable, nonatomic, copy) NSString *link;
 @property (readonly, nullable, nonatomic) NSString *summary;
 @property (nullable, nonatomic, copy) NSString *enclosure;
-@property (nullable, nonatomic, copy) NSDate *date;
-@property (nullable, nonatomic, copy) NSDate *createdDate;
+@property (nullable, nonatomic) NSDate *lastUpdate;
+@property (nullable, nonatomic) NSDate *publicationDate;
 @property (nullable, nonatomic, readonly) Folder *containingFolder;
 @property (nonatomic) NSInteger folderId;
 @property (nonatomic, getter=isRead, readonly) BOOL read;
 @property (nonatomic, getter=isRevised, readonly) BOOL revised;
 @property (nonatomic, getter=isFlagged, readonly) BOOL flagged;
 @property (nonatomic, getter=isDeleted, readonly) BOOL deleted;
-@property (nonatomic, readonly) BOOL hasComments;
 @property (nonatomic) BOOL hasEnclosure;
 @property (nonatomic, readonly) BOOL enclosureDownloaded;
 @property (nonatomic) NSInteger status;

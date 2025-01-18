@@ -25,17 +25,28 @@
 
 @dynamic delegate;
 
+- (void)setTableColumnHeaderImage:(NSImage *)image
+          forColumnWithIdentifier:(NSUserInterfaceItemIdentifier)identifier
+{
+    NSTableColumn *tableColumn = [self tableColumnWithIdentifier:identifier];
+    NSTableHeaderCell *headerCell = tableColumn.headerCell;
+    headerCell.image = image;
+
+    NSImageCell *imageCell = [[NSImageCell alloc] init];
+    tableColumn.dataCell = imageCell;
+}
+
 /* keyDown
  * Here is where we handle special keys when the article list view
  * has the focus so we can do custom things.
  */
 -(void)keyDown:(NSEvent *)theEvent
 {
-	if (theEvent.characters.length == 1)
-	{
+	if (theEvent.characters.length == 1) {
 		unichar keyChar = [theEvent.characters characterAtIndex:0];
-		if ([APPCONTROLLER handleKeyDown:keyChar withFlags:theEvent.modifierFlags])
+		if ([APPCONTROLLER handleKeyDown:keyChar withFlags:theEvent.modifierFlags]) {
 			return;
+		}
 	}
 	[super keyDown:theEvent];
 }
@@ -45,8 +56,7 @@
  */
 -(IBAction)copy:(id)sender
 {
-	if (self.selectedRow >= 0)
-	{
+	if (self.selectedRow >= 0) {
 		NSIndexSet * selectedRowIndexes = self.selectedRowIndexes;
 		[self.delegate copyTableSelection:selectedRowIndexes toPasteboard:NSPasteboard.generalPasteboard];
 	}
@@ -66,16 +76,13 @@
  */
 -(BOOL)validateMenuItem:(NSMenuItem *)menuItem
 {
-	if (menuItem.action == @selector(copy:))
-	{
+	if (menuItem.action == @selector(copy:)) {
 		return self.selectedRow >= 0;
 	}
-	if (menuItem.action == @selector(delete:))
-	{
+	if (menuItem.action == @selector(delete:)) {
         return [self.delegate canDeleteMessageAtRow:self.selectedRow];
 	}
-	if (menuItem.action == @selector(selectAll:))
-	{
+	if (menuItem.action == @selector(selectAll:)) {
 		return YES;
 	}
 	return NO;
@@ -87,7 +94,6 @@
     switch(context) {
         case NSDraggingContextWithinApplication:
             return NSDragOperationCopy|NSDragOperationGeneric;
-            break;
         default:
             return NSDragOperationCopy;
     }

@@ -19,7 +19,6 @@
 
 #import "Database+Migration.h"
 
-#import "Constants.h"
 #import "Preferences.h"
 #import "Vienna-Swift.h"
 
@@ -250,6 +249,14 @@
 
             database.userVersion = (uint32_t)23;
             NSLog(@"Updated database schema to version 23.");
+        }
+        case 24:
+        case 25: {
+            //correct articles that were saved with updatedDate is 1.1.1970 00:00
+            [database executeStatements:@"UPDATE messages SET date = createddate WHERE date = 0"];
+
+            database.userVersion = (uint32_t)25;
+            NSLog(@"Updated database schema to version 25.");
         }
     }
 }

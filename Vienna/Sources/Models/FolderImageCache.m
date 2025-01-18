@@ -7,7 +7,8 @@
 //
 
 #import "FolderImageCache.h"
-#import "Preferences.h"
+
+#import "NSFileManager+Paths.h"
 #import "StringExtensions.h"
 
 @interface FolderImageCache ()
@@ -15,21 +16,24 @@
 
 @end
 
-
-static FolderImageCache * _folderImageCache = nil;
-
-@implementation FolderImageCache
-
+@implementation FolderImageCache {
+    NSString *imagesCacheFolder;
+    NSMutableDictionary *folderImagesArray;
+    BOOL initializedFolderImagesArray;
+}
 
 /* defaultCache
  * Returns a pointer to the default cache. There is just one default cache
  * and we instantiate it if it doesn't exist.
  */
-+(FolderImageCache *)defaultCache
++ (FolderImageCache *)defaultCache
 {
-    if (_folderImageCache == nil)
-        _folderImageCache = [[FolderImageCache alloc] init];
-    return _folderImageCache;
+    static FolderImageCache *folderImageCache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        folderImageCache = [FolderImageCache new];
+    });
+    return folderImageCache;
 }
 
 /* init
@@ -37,8 +41,7 @@ static FolderImageCache * _folderImageCache = nil;
  */
 -(instancetype)init
 {
-    if ((self = [super init]) != nil)
-    {
+    if ((self = [super init]) != nil) {
         imagesCacheFolder = nil;
         initializedFolderImagesArray = NO;
         folderImagesArray = [[NSMutableDictionary alloc] init];
@@ -56,8 +59,7 @@ static FolderImageCache * _folderImageCache = nil;
     folderImagesArray[baseURL] = image;
     
     // Save icon to disk here.
-    if (imagesCacheFolder != nil)
-    {
+    if (imagesCacheFolder != nil) {
         NSString * fullFilePath = [[imagesCacheFolder stringByAppendingPathComponent:baseURL] stringByAppendingPathExtension:@"tiff"];
         NSData *imageData = nil;
         @try {
@@ -67,8 +69,9 @@ static FolderImageCache * _folderImageCache = nil;
             imageData = nil;
             NSLog(@"tiff exception with %@", fullFilePath);
         }
-        if (imageData != nil)
+        if (imageData != nil) {
             [[NSFileManager defaultManager] createFileAtPath:fullFilePath contents:imageData attributes:nil];
+        }
     }
 }
 
@@ -88,8 +91,7 @@ static FolderImageCache * _folderImageCache = nil;
  */
 -(void)initFolderImagesArray
 {
-    if (!initializedFolderImagesArray)
-    {
+    if (!initializedFolderImagesArray) {
         NSFileManager * fileManager = [NSFileManager defaultManager];
         NSArray * listOfFiles;
         BOOL isDir;
@@ -97,11 +99,12 @@ static FolderImageCache * _folderImageCache = nil;
         // Get and cache the path to the folder. This is the best time to make sure it
         // exists. The penalty for it not existing AND us being unable to create it is that
         // we don't cache folder icons in this session.
-        imagesCacheFolder = [Preferences standardPreferences].imagesFolder;
-        if (![fileManager fileExistsAtPath:imagesCacheFolder isDirectory:&isDir])
-        {
-            if (![fileManager createDirectoryAtPath:imagesCacheFolder withIntermediateDirectories:YES attributes:nil error:nil])
-            {
+        NSURL *appSupportURL = fileManager.vna_applicationSupportDirectory;
+        NSURL *imagesURL = [appSupportURL URLByAppendingPathComponent:@"Images"
+                                                          isDirectory:YES];
+        imagesCacheFolder = imagesURL.path;
+        if (![fileManager fileExistsAtPath:imagesCacheFolder isDirectory:&isDir]) {
+            if (![fileManager createDirectoryAtPath:imagesCacheFolder withIntermediateDirectories:YES attributes:nil error:nil]) {
                 NSLog(@"Cannot create image cache at %@. Will not cache folder images in this session.", imagesCacheFolder);
                 imagesCacheFolder = nil;
             }
@@ -109,8 +112,7 @@ static FolderImageCache * _folderImageCache = nil;
             return;
         }
         
-        if (!isDir)
-        {
+        if (!isDir) {
             NSLog(@"The file at %@ is not a directory. Will not cache folder images in this session.", imagesCacheFolder);
             imagesCacheFolder = nil;
             initializedFolderImagesArray = YES;
@@ -120,19 +122,15 @@ static FolderImageCache * _folderImageCache = nil;
         // Remember - not every file we find may be a valid image file. We use the filename as
         // the key but check the extension too.
         listOfFiles = [fileManager contentsOfDirectoryAtPath:imagesCacheFolder error:nil];
-        if (listOfFiles != nil)
-        {
+        if (listOfFiles != nil) {
             NSString * fileName;
             
-            for (fileName in listOfFiles)
-            {
-                if ([fileName.pathExtension isEqualToString:@"tiff"])
-                {
+            for (fileName in listOfFiles) {
+                if ([fileName.pathExtension isEqualToString:@"tiff"]) {
                     NSString * fullPath = [imagesCacheFolder stringByAppendingPathComponent:fileName];
                     NSData * imageData = [fileManager contentsAtPath:fullPath];
                     NSImage * iconImage = [[NSImage alloc] initWithData:imageData];
-                    if (iconImage.valid)
-                    {
+                    if (iconImage.valid) {
                         iconImage.size = NSMakeSize(16, 16);
                         NSString * homePageSiteRoot = (fullPath.lastPathComponent.stringByDeletingPathExtension).vna_convertStringToValidPath;
                         folderImagesArray[homePageSiteRoot] = iconImage;

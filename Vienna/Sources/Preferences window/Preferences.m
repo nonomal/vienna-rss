@@ -20,59 +20,85 @@
 
 #import "Preferences.h"
 
+@import os.log;
 @import Sparkle;
-
-#import <os/log.h>
 
 #import "Article.h"
 #import "Constants.h"
 #import "DownloadItem.h"
+#import "FeedListConstants.h"
 #import "NSFileManager+Paths.h"
 #import "NSKeyedArchiver+Compatibility.h"
 #import "NSKeyedUnarchiver+Compatibility.h"
 #import "SearchMethod.h"
+#import "StringExtensions.h"
 #import "Vienna-Swift.h"
 
 #define VNA_LOG os_log_create("--", "Preferences")
 
 // Initial paths
-NSString * MA_DefaultStyleName = @"Default";
-NSString * MA_Database_Name = @"messages.db";
-NSString * MA_ImagesFolder_Name = @"Images";
-NSString * MA_StylesFolder_Name = @"Styles";
-NSString * MA_ScriptsFolder_Name = @"Scripts";
-NSString * MA_PluginsFolder_Name = @"Plugins";
-NSString * MA_FeedSourcesFolder_Name = @"Sources";
-
-// NSNotificationCenter string constants
-NSString * const kMA_Notify_MinimumFontSizeChange = @"MA_Notify_MinimumFontSizeChange";
-NSString * const kMA_Notify_UseJavaScriptChange = @"MA_Notify_UseJavaScriptChange";
-
-
-// The default preferences object.
-static Preferences * _standardPreferences = nil;
+static NSString * const MA_DefaultStyleName = @"Default";
+static NSString * const MA_Database_Name = @"messages.db";
+static NSString * const MA_FeedSourcesFolder_Name = @"Sources";
 
 // Private methods
 @interface Preferences ()
 
 @property (readonly, nonatomic) NSDictionary *allocFactoryDefaults;
 
-@property (nonatomic) NSNumber *useNewBrowserInternal;
-
 -(void)createFeedSourcesFolderIfNecessary;
 
 @end
 
-@implementation Preferences
+@implementation Preferences {
+    NSUserDefaults *userPrefs;
+    float markReadInterval;
+    NSInteger minimumFontSize;
+    NSInteger refreshFrequency;
+    NSInteger autoExpireDuration;
+    NSInteger filterMode;
+    NSInteger layout;
+    NSInteger newArticlesNotification;
+    NSInteger foldersTreeSortMethod;
+    BOOL refreshOnStartup;
+    BOOL alwaysAcceptBetas;
+    BOOL enableMinimumFontSize;
+    BOOL openLinksInVienna;
+    BOOL openLinksInBackground;
+    BOOL hasPrefs;
+    BOOL showFolderImages;
+    BOOL useJavaScript;
+    BOOL showAppInStatusBar;
+    BOOL showStatusBar;
+    BOOL showFilterBar;
+    BOOL shouldSaveFeedSource;
+    BOOL syncGoogleReader;
+    BOOL prefersGoogleNewSubscription;
+    BOOL markUpdatedAsNew;
+    NSString *displayStyle;
+    CGFloat textSizeMultiplier;
+    NSString *defaultDatabase;
+    NSString *feedSourcesFolder;
+    NSFont *articleFont;
+    NSArray *articleSortDescriptors;
+    SearchMethod *searchMethod;
+    NSUInteger concurrentDownloads;
+    NSString *syncServer;
+    NSString *syncScheme;
+    NSString *syncingUser;
+}
 
 /* standardPreferences
  * Return the single set of Vienna wide preferences object.
  */
-+(Preferences *)standardPreferences
++ (Preferences *)standardPreferences
 {
-	if (_standardPreferences == nil)
-		_standardPreferences = [[Preferences alloc] init];
-	return _standardPreferences;
+    static Preferences *standardPreferences;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        standardPreferences = [Preferences new];
+    });
+    return standardPreferences;
 }
 
 /* init
@@ -80,96 +106,18 @@ static Preferences * _standardPreferences = nil;
  */
 -(instancetype)init
 {
-	if ((self = [super init]) != nil)
-	{
-		// Look to see where we're getting our preferences from. This is a command line
-		// argument of the form:
-		//
-		//  -profile <name>
-		//
-		// where <name> is the name of the folder at the same level of the application.
-		// If no profile is specified, is called "default" or is absent then we fall back
-		// on the user profile.
-		//
-		NSArray * appArguments = [NSProcessInfo processInfo].arguments;
-		NSEnumerator * enumerator = [appArguments objectEnumerator];
-		NSString * argName;
-		
-		while ((argName = [enumerator nextObject]) != nil)
-		{
-			if ([argName.lowercaseString isEqualToString:@"-profile"])
-			{
-				NSString * argValue = [enumerator nextObject];
-				if (argValue == nil || [argValue isEqualToString:@"default"])
-					break;
-				profilePath = argValue;
-				break;
-			}
-		}
-		
-		// Look to see if there's a cached profile path from the updater
-		if (profilePath == nil)
-			profilePath = [[NSUserDefaults standardUserDefaults] stringForKey:MAPref_Profile_Path];
-		[[NSUserDefaults standardUserDefaults] removeObjectForKey:MAPref_Profile_Path];
-		
+	if ((self = [super init]) != nil) {
 		// Merge in the user preferences from the defaults.
 		NSDictionary * defaults = self.allocFactoryDefaults;
-		if (profilePath == nil)
-		{
-			preferencesPath = nil;
-			userPrefs = [NSUserDefaults standardUserDefaults];
-            [self migratePreferences];
-			[userPrefs registerDefaults:defaults];
-			
-			// Application-specific folder locations
-			defaultDatabase = [userPrefs valueForKey:MAPref_DefaultDatabase];
-			NSFileManager *fileManager = NSFileManager.defaultManager;
-			NSString *appSupportPath = fileManager.vna_applicationSupportDirectory.path;
-			imagesFolder = [appSupportPath stringByAppendingPathComponent:MA_ImagesFolder_Name];
-			stylesFolder = [appSupportPath stringByAppendingPathComponent:MA_StylesFolder_Name];
-			pluginsFolder = [appSupportPath stringByAppendingPathComponent:MA_PluginsFolder_Name];
-			scriptsFolder = fileManager.vna_applicationScriptsDirectory.path;
-			feedSourcesFolder = [appSupportPath stringByAppendingPathComponent:MA_FeedSourcesFolder_Name];
-		}
-		else
-		{
-			// Make sure profilePath exists and create it otherwise. A failure to create the profile
-			// path counts as treating the profile as transient for this session.
-			NSFileManager * fileManager = [NSFileManager defaultManager];
-			BOOL isDir;
-			
-			if (![fileManager fileExistsAtPath:profilePath isDirectory:&isDir])
-			{
-				NSError * error;
-				if (![fileManager createDirectoryAtPath:profilePath withIntermediateDirectories:YES attributes:NULL error:&error])
-				{
-					NSLog(@"Cannot create profile folder %@: %@", profilePath, error);
-					profilePath = nil;
-				}
-			}
-			
-			// The preferences file is stored under the profile folder with the bundle identifier
-			// name plus the .plist extension. (This is the same convention used by NSUserDefaults.)
-			if (profilePath != nil)
-			{
-				NSDictionary * fileAttributes = [NSBundle mainBundle].infoDictionary;
-				preferencesPath = [profilePath stringByAppendingPathComponent:fileAttributes[@"CFBundleIdentifier"]];
-				preferencesPath = [preferencesPath stringByAppendingString:@".plist"];
-			}
-			userPrefs = [[NSMutableDictionary alloc] initWithDictionary:defaults];
-            [self migratePreferences];
-			if (preferencesPath != nil)
-				[userPrefs addEntriesFromDictionary:[NSDictionary dictionaryWithContentsOfFile:preferencesPath]];
-            
-			// Other folders are local to the profilePath
-			defaultDatabase = [profilePath stringByAppendingPathComponent:MA_Database_Name];
-			imagesFolder = [profilePath stringByAppendingPathComponent:MA_ImagesFolder_Name].stringByExpandingTildeInPath;
-			stylesFolder = [profilePath stringByAppendingPathComponent:MA_StylesFolder_Name].stringByExpandingTildeInPath;
-			scriptsFolder = [profilePath stringByAppendingPathComponent:MA_ScriptsFolder_Name].stringByExpandingTildeInPath;
-			pluginsFolder = [profilePath stringByAppendingPathComponent:MA_PluginsFolder_Name].stringByExpandingTildeInPath;
-			feedSourcesFolder = [profilePath stringByAppendingPathComponent:MA_FeedSourcesFolder_Name].stringByExpandingTildeInPath;
-		}
-        
+		userPrefs = NSUserDefaults.standardUserDefaults;
+		[self migrateEncodedPreferences];
+		[userPrefs registerDefaults:defaults];
+
+		// Application-specific folder locations
+		defaultDatabase = [userPrefs stringForKey:MAPref_DefaultDatabase];
+		NSFileManager *fileManager = NSFileManager.defaultManager;
+		NSString *appSupportPath = fileManager.vna_applicationSupportDirectory.path;
+		feedSourcesFolder = [appSupportPath stringByAppendingPathComponent:MA_FeedSourcesFolder_Name];
 		
 		// Load those settings that we cache.
 		foldersTreeSortMethod = [self integerForKey:MAPref_AutoSortFoldersTree];
@@ -178,20 +126,19 @@ static Preferences * _standardPreferences = nil;
 		layout = [self integerForKey:MAPref_Layout];
 		refreshOnStartup = [self boolForKey:MAPref_CheckForNewArticlesOnStartup];
 		markUpdatedAsNew = [self boolForKey:MAPref_CheckForUpdatedArticles];
-		markReadInterval = [[userPrefs valueForKey:MAPref_MarkReadInterval] floatValue];
+		markReadInterval = [userPrefs floatForKey:MAPref_MarkReadInterval];
 		minimumFontSize = [self integerForKey:MAPref_MinimumFontSize];
 		newArticlesNotification = [self integerForKey:MAPref_NewArticlesNotification];
 		enableMinimumFontSize = [self boolForKey:MAPref_UseMinimumFontSize];
 		autoExpireDuration = [self integerForKey:MAPref_AutoExpireDuration];
 		openLinksInVienna = [self boolForKey:MAPref_OpenLinksInVienna];
 		openLinksInBackground = [self boolForKey:MAPref_OpenLinksInBackground];
-		displayStyle = [userPrefs valueForKey:MAPref_ActiveStyleName];
-		textSizeMultiplier = [[userPrefs valueForKey:MAPref_ActiveTextSizeMultiplier] doubleValue];
+		displayStyle = [userPrefs stringForKey:MAPref_ActiveStyleName];
+		textSizeMultiplier = [userPrefs doubleForKey:MAPref_ActiveTextSizeMultiplier];
 		showFolderImages = [self boolForKey:MAPref_ShowFolderImages];
 		showStatusBar = [self boolForKey:MAPref_ShowStatusBar];
 		showFilterBar = [self boolForKey:MAPref_ShowFilterBar];
 		useJavaScript = [self boolForKey:MAPref_UseJavaScript];
-        useNewBrowser = [self boolForKey:MAPref_UseNewBrowser];
 		showAppInStatusBar = [self boolForKey:MAPref_ShowAppInStatusBar];
 		shouldSaveFeedSource = [self boolForKey:MAPref_ShouldSaveFeedSource];
 		concurrentDownloads = [self integerForKey:MAPref_ConcurrentDownloads];
@@ -200,8 +147,6 @@ static Preferences * _standardPreferences = nil;
         // Archived objects
         articleFont = [NSKeyedUnarchiver vna_unarchivedObjectOfClass:[NSFont class]
                                                             fromData:[self objectForKey:MAPref_ArticleListFont]];
-        folderFont = [NSKeyedUnarchiver vna_unarchivedObjectOfClass:[NSFont class]
-                                                           fromData:[self objectForKey:MAPref_FolderListFont]];
         searchMethod = [NSKeyedUnarchiver vna_unarchivedObjectOfClass:[SearchMethod class]
                                                              fromData:[self objectForKey:MAPref_SearchMethod]];
         articleSortDescriptors = [NSKeyedUnarchiver vna_unarchivedArrayOfObjectsOfClass:[NSSortDescriptor class]
@@ -215,28 +160,25 @@ static Preferences * _standardPreferences = nil;
         // Open Reader sync
         syncGoogleReader = [self boolForKey:MAPref_SyncGoogleReader];
         prefersGoogleNewSubscription = [self boolForKey:MAPref_GoogleNewSubscription];
-		syncServer = [userPrefs valueForKey:MAPref_SyncServer];
-		syncingUser = [userPrefs valueForKey:MAPref_SyncingUser];
-		_syncingAppId = [userPrefs valueForKey:MAPref_SyncingAppId];
-		_syncingAppKey = [userPrefs valueForKey:MAPref_SyncingAppKey];
+		syncServer = [userPrefs stringForKey:MAPref_SyncServer];
+        syncScheme = [userPrefs stringForKey:MAPref_SyncScheme];
+		syncingUser = [userPrefs stringForKey:MAPref_SyncingUser];
+		_syncingAppId = [userPrefs stringForKey:MAPref_SyncingAppId];
+		_syncingAppKey = [userPrefs stringForKey:MAPref_SyncingAppKey];
 				
 		//Sparkle autoupdate
         alwaysAcceptBetas = [self boolForKey:MAPref_AlwaysAcceptBetas];
 
-		if (shouldSaveFeedSource)
-		{
+		if (shouldSaveFeedSource) {
 			[self createFeedSourcesFolderIfNecessary];
 		}
 		
 		// Here is where we want to put any logic that depends on the last or highest version of Vienna that has been run.
 		NSString * bundleVersionString = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-		if (bundleVersionString != nil)
-		{
+		if (bundleVersionString != nil) {
 			NSInteger bundleVersion = bundleVersionString.integerValue;
-			if (bundleVersion > 0)
-			{
-				if (bundleVersion > [self integerForKey:MAPref_HighestViennaVersionRun])
-				{
+			if (bundleVersion > 0) {
+				if (bundleVersion > [self integerForKey:MAPref_HighestViennaVersionRun]) {
 					[self setInteger:bundleVersion forKey:MAPref_HighestViennaVersionRun];
 				}
 				[self setInteger:bundleVersion forKey:MAPref_LastViennaVersionRun];
@@ -268,13 +210,15 @@ static Preferences * _standardPreferences = nil;
 
 	NSFileManager *fileManager = NSFileManager.defaultManager;
 	NSString *appSupportPath = fileManager.vna_applicationSupportDirectory.path;
+    NSSortDescriptor *sortDescriptor = [[NSSortDescriptor alloc] initWithKey:[@"articleData." stringByAppendingString:MA_Field_LastUpdate]
+                                                                   ascending:YES];
 
 	defaultValues[MAPref_DefaultDatabase] = [appSupportPath stringByAppendingPathComponent:MA_Database_Name];
 	defaultValues[MAPref_CheckForUpdatedArticles] = boolNo;
 	defaultValues[MAPref_ShowUnreadArticlesInBold] = boolYes;
 	defaultValues[MAPref_CheckForNewArticlesOnStartup] = boolYes;
 	defaultValues[MAPref_CachedFolderID] = @1;
-	defaultValues[MAPref_SortColumn] = MA_Field_Date;
+	defaultValues[MAPref_SortColumn] = MA_Field_LastUpdate;
 	defaultValues[MAPref_CheckFrequency] = @(MA_Default_Check_Frequency);
 	defaultValues[MAPref_MarkReadInterval] = @((float)MA_Default_Read_Interval);
 	defaultValues[MAPref_ActiveStyleName] = MA_DefaultStyleName;
@@ -283,7 +227,6 @@ static Preferences * _standardPreferences = nil;
 	defaultValues[MAPref_AutoSortFoldersTree] = [NSNumber numberWithInt:VNAFolderSortManual];
 	defaultValues[MAPref_ShowFolderImages] = boolYes;
 	defaultValues[MAPref_UseJavaScript] = boolYes;
-	defaultValues[MAPref_UseNewBrowser] = boolNo;
 	defaultValues[MAPref_OpenLinksInVienna] = boolYes;
 	defaultValues[MAPref_OpenLinksInBackground] = boolYes;
 	defaultValues[MAPref_ShowAppInStatusBar] = boolNo;
@@ -293,7 +236,6 @@ static Preferences * _standardPreferences = nil;
 	defaultValues[MAPref_FilterMode] = [NSNumber numberWithInt:VNAFilterAll];
 	defaultValues[MAPref_MinimumFontSize] = @(MA_Default_MinimumFontSize);
 	defaultValues[MAPref_AutoExpireDuration] = @(MA_Default_AutoExpireDuration);
-	defaultValues[MAPref_LastRefreshDate] = [NSDate distantPast];
 	defaultValues[MAPref_Layout] = [NSNumber numberWithInt:VNALayoutReport];
 	defaultValues[MAPref_NewArticlesNotification] = [NSNumber numberWithInt:0];
 	defaultValues[MAPref_EmptyTrashNotification] = [NSNumber numberWithInt:VNAEmptyTrashWithWarning];
@@ -301,15 +243,15 @@ static Preferences * _standardPreferences = nil;
 	defaultValues[MAPref_LastViennaVersionRun] = @0;
 	defaultValues[MAPref_ShouldSaveFeedSource] = boolYes;
 	defaultValues[MAPref_ShouldSaveFeedSourceBackup] = boolNo;
+    defaultValues[MAPref_ShowDetailsOnFeedCredentialsDialog] = boolNo;
+    defaultValues[MAPref_ShowEnclosureBar] = boolYes;
 
     // Archives
     defaultValues[MAPref_ArticleListFont] = [NSKeyedArchiver vna_archivedDataWithRootObject:defaultFont
                                                                       requiringSecureCoding:YES];
-    defaultValues[MAPref_FolderListFont] = [NSKeyedArchiver vna_archivedDataWithRootObject:defaultFont
-                                                                     requiringSecureCoding:YES];
-    defaultValues[MAPref_ArticleListSortOrders] = [NSKeyedArchiver vna_archivedDataWithRootObject:@[]
+    defaultValues[MAPref_ArticleListSortOrders] = [NSKeyedArchiver vna_archivedDataWithRootObject:@[sortDescriptor]
                                                                             requiringSecureCoding:YES];
-    defaultValues[MAPref_SearchMethod] = [NSKeyedArchiver vna_archivedDataWithRootObject:[SearchMethod allArticlesSearchMethod]
+    defaultValues[MAPref_SearchMethod] = [NSKeyedArchiver vna_archivedDataWithRootObject:SearchMethod.allArticlesSearchMethod
                                                                    requiringSecureCoding:YES];
 
     defaultValues[MAPref_ConcurrentDownloads] = @(MA_Default_ConcurrentDownloads);
@@ -320,27 +262,46 @@ static Preferences * _standardPreferences = nil;
     defaultValues[MAPref_AlwaysAcceptBetas] = boolNo;
     defaultValues[MAPref_UserAgentName] = @"Vienna";
     defaultValues[MAPref_UseRelativeDates] = boolYes;
+    defaultValues[MAPref_FeedListSizeMode] = [NSNumber numberWithInteger:VNAFeedListSizeModeSmall];
 
 	return [defaultValues copy];
 }
 
-- (void)migratePreferences
+- (void)migrateEncodedPreferences
 {
-    if ([userPrefs objectForKey:MAPref_Deprecated_ArticleListSortOrders]) {
-        NSData *archive = [self objectForKey:MAPref_Deprecated_ArticleListSortOrders];
+    // Deprecated defaults keys. These were used in older versions of Vienna.
+    NSString * const articleSortDescriptorsKey = @"ArticleSortDescriptors";
+    NSString * const downloadsListKey = @"DownloadsList";
+    NSString * const messageListFontKey = @"MessageListFont";
+    NSString * const folderFontKey = @"FolderFont";
+    NSString * const folderListFontKey = @"FolderListFont";
+
+    if ([userPrefs objectForKey:articleSortDescriptorsKey]) {
+        NSData *archive = [self objectForKey:articleSortDescriptorsKey];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        NSArray *sortDescriptors = [NSUnarchiver unarchiveObjectWithData:archive];
+        NSMutableArray *sortDescriptors = [[NSUnarchiver unarchiveObjectWithData:archive] mutableCopy];
 #pragma clang diagnostic pop
-        NSData *keyedArchive = [NSKeyedArchiver vna_archivedDataWithRootObject:sortDescriptors
+        // Two sort descriptors have a selector that was renamed.
+        [sortDescriptors enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
+            NSSortDescriptor *descriptor = obj;
+            if ([NSStringFromSelector(descriptor.selector) isEqualToString:@"numericCompare:"]) {
+                descriptor = [NSSortDescriptor sortDescriptorWithKey:descriptor.key
+                                                           ascending:descriptor.ascending
+                                                            selector:@selector(vna_caseInsensitiveNumericCompare:)];
+                [sortDescriptors replaceObjectAtIndex:idx
+                                           withObject:descriptor];
+            }
+        }];
+        NSData *keyedArchive = [NSKeyedArchiver vna_archivedDataWithRootObject:[sortDescriptors copy]
                                                          requiringSecureCoding:YES];
         [self setObject:keyedArchive forKey:MAPref_ArticleListSortOrders];
-        [userPrefs removeObjectForKey:MAPref_Deprecated_ArticleListSortOrders];
+        [userPrefs removeObjectForKey:articleSortDescriptorsKey];
     }
 
-    if ([userPrefs objectForKey:MAPref_Deprecated_DownloadItemList]) {
+    if ([userPrefs objectForKey:downloadsListKey]) {
         // Download items were stored as an array of non-keyed archives.
-        NSArray *array = [self objectForKey:MAPref_Deprecated_DownloadItemList];
+        NSArray *array = [self objectForKey:downloadsListKey];
         NSMutableArray *downloadItems = [NSMutableArray array];
 
         for (NSData *archive in array) {
@@ -359,23 +320,11 @@ static Preferences * _standardPreferences = nil;
         NSData *keyedArchive = [NSKeyedArchiver vna_archivedDataWithRootObject:downloadItems
                                                          requiringSecureCoding:YES];
         [self setObject:keyedArchive forKey:MAPref_DownloadItemList];
-        [userPrefs removeObjectForKey:MAPref_Deprecated_DownloadItemList];
+        [userPrefs removeObjectForKey:downloadsListKey];
     }
 
-    if ([userPrefs objectForKey:MAPref_Deprecated_FolderListFont]) {
-        NSData *archive = [self objectForKey:MAPref_Deprecated_FolderListFont];
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        NSFont *font = [NSUnarchiver unarchiveObjectWithData:archive];
-#pragma clang diagnostic pop
-        NSData *keyedArchive = [NSKeyedArchiver vna_archivedDataWithRootObject:font
-                                                         requiringSecureCoding:YES];
-        [self setObject:keyedArchive forKey:MAPref_FolderListFont];
-        [userPrefs removeObjectForKey:MAPref_Deprecated_FolderListFont];
-    }
-
-    if ([userPrefs objectForKey:MAPref_Deprecated_ArticleListFont]) {
-        NSData *archive = [self objectForKey:MAPref_Deprecated_ArticleListFont];
+    if ([userPrefs objectForKey:messageListFontKey]) {
+        NSData *archive = [self objectForKey:messageListFontKey];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         NSFont *font = [NSUnarchiver unarchiveObjectWithData:archive];
@@ -383,22 +332,35 @@ static Preferences * _standardPreferences = nil;
         NSData *keyedArchive = [NSKeyedArchiver vna_archivedDataWithRootObject:font
                                                          requiringSecureCoding:YES];
         [self setObject:keyedArchive forKey:MAPref_ArticleListFont];
-        [userPrefs removeObjectForKey:MAPref_Deprecated_ArticleListFont];
+        [userPrefs removeObjectForKey:messageListFontKey];
     }
-}
 
-/* savePreferences
- * Save the user preferences back to where we loaded them from.
- */
--(void)savePreferences
-{
-	if (preferencesPath == nil)
-		[userPrefs synchronize];
-	else
-	{
-		if (![userPrefs writeToFile:preferencesPath atomically:NO])
-			NSLog(@"Failed to update preferences to %@", preferencesPath);
-	}
+    if ([userPrefs objectForKey:folderFontKey]) {
+        NSData *archive = [self objectForKey:folderFontKey];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        NSFont *font = [NSUnarchiver unarchiveObjectWithData:archive];
+#pragma clang diagnostic pop
+        if (font && font.pointSize <= 11.0) {
+            [userPrefs setInteger:VNAFeedListSizeModeTiny
+                           forKey:MAPref_FeedListSizeMode];
+        }
+        [userPrefs removeObjectForKey:folderFontKey];
+    }
+
+    if ([userPrefs objectForKey:folderListFontKey]) {
+        NSData *archive = [self objectForKey:folderListFontKey];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        NSFont *font = [NSKeyedUnarchiver vna_unarchivedObjectOfClass:[NSFont class]
+                                                             fromData:archive];
+#pragma clang diagnostic pop
+        if (font && font.pointSize <= 11.0) {
+            [userPrefs setInteger:VNAFeedListSizeModeTiny
+                           forKey:MAPref_FeedListSizeMode];
+        }
+        [userPrefs removeObjectForKey:folderListFontKey];
+    }
 }
 
 /* setBool
@@ -406,7 +368,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setBool:(BOOL)value forKey:(NSString *)defaultName
 {
-	[userPrefs setObject:@(value) forKey:defaultName];
+	[userPrefs setBool:value forKey:defaultName];
 }
 
 /* setInteger
@@ -414,7 +376,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setInteger:(NSInteger)value forKey:(NSString *)defaultName
 {
-	[userPrefs setObject:@(value) forKey:defaultName];
+	[userPrefs setInteger:value forKey:defaultName];
 }
 
 /* setString
@@ -446,7 +408,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(BOOL)boolForKey:(NSString *)defaultName
 {
-	return [[userPrefs valueForKey:defaultName] boolValue];
+	return [userPrefs boolForKey:defaultName];
 }
 
 /* integerForKey
@@ -454,7 +416,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(NSInteger)integerForKey:(NSString *)defaultName
 {
-	return [[userPrefs valueForKey:defaultName] integerValue];
+	return [userPrefs integerForKey:defaultName];
 }
 
 /* stringForKey
@@ -462,7 +424,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(NSString *)stringForKey:(NSString *)defaultName
 {
-	return [userPrefs valueForKey:defaultName];
+	return [userPrefs stringForKey:defaultName];
 }
 
 /* arrayForKey
@@ -470,7 +432,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(NSArray *)arrayForKey:(NSString *)defaultName
 {
-	return [userPrefs valueForKey:defaultName];
+	return [userPrefs arrayForKey:defaultName];
 }
 
 /* objectForKey
@@ -481,36 +443,8 @@ static Preferences * _standardPreferences = nil;
 	return [userPrefs objectForKey:defaultName];
 }
 
-/* imagesFolder
- * Return the path to where the folder images are stored.
- */
--(NSString *)imagesFolder
-{
-	return imagesFolder;
-}
-
-/* pluginsFolder
- * Returns the path to where the user plugins are stored
- */
--(NSString *)pluginsFolder
-{
-	return pluginsFolder;
-}
-
-/* stylesFolder
- * Return the path to where the user styles are stored.
- */
--(NSString *)stylesFolder
-{
-	return stylesFolder;
-}
-
-/* scriptsFolder
- * Return the path to where the scripts are stored.
- */
--(NSString *)scriptsFolder
-{
-	return scriptsFolder;
+- (void)removeObjectForKey:(NSString *)defaultName {
+    [userPrefs removeObjectForKey:defaultName];
 }
 
 /* defaultDatabase
@@ -526,10 +460,9 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setDefaultDatabase:(NSString *)newDatabase
 {
-	if (defaultDatabase != newDatabase)
-	{
+	if (defaultDatabase != newDatabase) {
 		defaultDatabase = newDatabase;
-		[userPrefs setValue:newDatabase forKey:MAPref_DefaultDatabase];
+		[userPrefs setObject:newDatabase forKey:MAPref_DefaultDatabase];
 	}
 }
 
@@ -557,33 +490,17 @@ static Preferences * _standardPreferences = nil;
 	return useJavaScript;
 }
 
--(BOOL)useNewBrowser
-{
-    if (!_useNewBrowserInternal) {
-        //init only once per application run
-        _useNewBrowserInternal = [NSNumber numberWithBool:useNewBrowser];
-    }
-    return [_useNewBrowserInternal boolValue];
-}
-
 /* setEnableJavaScript
  * Enable whether JavaScript is used.
  */
 -(void)setUseJavaScript:(BOOL)flag
 {
-	if (useJavaScript != flag)
-	{
+	if (useJavaScript != flag) {
 		useJavaScript = flag;
 		[self setBool:flag forKey:MAPref_UseJavaScript];
-		[[NSNotificationCenter defaultCenter] postNotificationName:kMA_Notify_UseJavaScriptChange
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_UseJavaScriptChange
                                                             object:nil];
 	}
-}
-
--(void)setUseNewBrowser:(BOOL)flag
-{
-    [self setBool:flag forKey:MAPref_UseNewBrowser];
-    useNewBrowser = flag;
 }
 
 -(NSUInteger)concurrentDownloads {
@@ -594,7 +511,7 @@ static Preferences * _standardPreferences = nil;
 	if (downloads != concurrentDownloads) {
 		concurrentDownloads = downloads;
 		[self setInteger:downloads forKey:MAPref_ConcurrentDownloads];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_CowncurrentDownloadsChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_ConcurrentDownloadsChange object:nil];
 
 	}
 }
@@ -613,11 +530,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setMinimumFontSize:(NSInteger)newSize
 {
-	if (newSize != minimumFontSize)
-	{
+	if (newSize != minimumFontSize) {
 		minimumFontSize = newSize;
 		[self setInteger:minimumFontSize forKey:MAPref_MinimumFontSize];
-		[[NSNotificationCenter defaultCenter] postNotificationName:kMA_Notify_MinimumFontSizeChange
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_MinimumFontSizeChange
                                                             object:nil];
 	}
 }
@@ -627,11 +543,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setEnableMinimumFontSize:(BOOL)flag
 {
-	if (enableMinimumFontSize != flag)
-	{
+	if (enableMinimumFontSize != flag) {
 		enableMinimumFontSize = flag;
 		[self setBool:flag forKey:MAPref_UseMinimumFontSize];
-		[[NSNotificationCenter defaultCenter] postNotificationName:kMA_Notify_MinimumFontSizeChange
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_MinimumFontSizeChange
                                                             object:nil];
 	}
 }
@@ -649,11 +564,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setShowFolderImages:(BOOL)flag
 {
-	if (showFolderImages != flag)
-	{
+	if (showFolderImages != flag) {
 		showFolderImages = flag;
 		[self setBool:flag forKey:MAPref_ShowFolderImages];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_ShowFolderImages" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_ShowFolderImages object:nil];
 	}
 }
 
@@ -673,8 +587,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setAutoExpireDuration:(NSInteger)newDuration
 {
-	if (newDuration != autoExpireDuration)
-	{
+	if (newDuration != autoExpireDuration) {
 		autoExpireDuration = newDuration;
 		[self setInteger:newDuration forKey:MAPref_AutoExpireDuration];
 	}
@@ -693,11 +606,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setLayout:(NSInteger)newLayout
 {
-	if (layout != newLayout)
-	{
+	if (layout != newLayout) {
 		layout = newLayout;
 		[self setInteger:newLayout forKey:MAPref_Layout];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_ReadingPaneChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_ReadingPaneChange object:nil];
 	}
 }
 
@@ -735,11 +647,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setRefreshFrequency:(NSInteger)newFrequency
 {
-	if (refreshFrequency != newFrequency)
-	{
+	if (refreshFrequency != newFrequency) {
 		refreshFrequency = newFrequency;
 		[self setInteger:newFrequency forKey:MAPref_CheckFrequency];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_CheckFrequencyChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_CheckFrequencyChange object:nil];
 	}
 }
 
@@ -756,11 +667,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setRefreshOnStartup:(BOOL)flag
 {
-	if (flag != refreshOnStartup)
-	{
+	if (flag != refreshOnStartup) {
 		refreshOnStartup = flag;
 		[self setBool:flag forKey:MAPref_CheckForNewArticlesOnStartup];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -777,11 +687,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setAlwaysAcceptBetas:(BOOL)flag
 {
-	if (flag != alwaysAcceptBetas)
-	{
+	if (flag != alwaysAcceptBetas) {
 		alwaysAcceptBetas = flag;
 		[self setBool:flag forKey:MAPref_AlwaysAcceptBetas];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -800,11 +709,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setMarkReadInterval:(float)newInterval
 {
-	if (newInterval != markReadInterval)
-	{
+	if (newInterval != markReadInterval) {
 		markReadInterval = newInterval;
 		[self setObject:@((float)newInterval) forKey:MAPref_MarkReadInterval];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -821,8 +729,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setFilterMode:(NSInteger)newMode
 {
-	if (filterMode != newMode)
-	{
+	if (filterMode != newMode) {
 		filterMode = newMode;
 		[self setInteger:filterMode forKey:MAPref_FilterMode];
 	}
@@ -843,11 +750,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setOpenLinksInVienna:(BOOL)flag
 {
-	if (openLinksInVienna != flag)
-	{
+	if (openLinksInVienna != flag) {
 		openLinksInVienna = flag;
 		[self setBool:flag forKey:MAPref_OpenLinksInVienna];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -865,11 +771,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setOpenLinksInBackground:(BOOL)flag
 {
-	if (openLinksInBackground != flag)
-	{
+	if (openLinksInBackground != flag) {
 		openLinksInBackground = flag;
 		[self setBool:flag forKey:MAPref_OpenLinksInBackground];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -887,11 +792,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setMarkUpdatedAsNew:(BOOL)flag
 {
-	if (markUpdatedAsNew != flag)
-	{
+	if (markUpdatedAsNew != flag) {
 		markUpdatedAsNew = flag;
 		[self setBool:flag forKey:MAPref_CheckForUpdatedArticles];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -916,12 +820,12 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setDisplayStyle:(NSString *)newStyleName withNotification:(BOOL)flag
 {
-	if (![displayStyle isEqualToString:newStyleName])
-	{
+	if (![displayStyle isEqualToString:newStyleName]) {
 		displayStyle = newStyleName;
 		[self setString:displayStyle forKey:MAPref_ActiveStyleName];
-		if (flag)
-			[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_StyleChange" object:nil];
+		if (flag) {
+			[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_StyleChange object:nil];
+		}
 	}
 }
 
@@ -938,52 +842,11 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setTextSizeMultiplier:(CGFloat)newValue
 {
-	if (newValue != textSizeMultiplier)
-	{
+	if (newValue != textSizeMultiplier) {
 		textSizeMultiplier = newValue;
 		[self setObject:@(newValue) forKey:MAPref_ActiveTextSizeMultiplier];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_StyleChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_StyleChange object:nil];
 	}
-}
-
-/* folderListFont
- * Retrieve the name of the font used in the folder list
- */
--(NSString *)folderListFont
-{
-	return folderFont.fontName;
-}
-
-/* folderListFontSize
- * Retrieve the size of the font used in the folder list
- */
--(NSInteger)folderListFontSize
-{
-	return folderFont.pointSize;
-}
-
-/* setFolderListFont
- * Retrieve the name of the font used in the folder list
- */
--(void)setFolderListFont:(NSString *)newFontName
-{
-	folderFont = [NSFont fontWithName:[newFontName copy] size:self.folderListFontSize];
-    NSData *archive = [NSKeyedArchiver vna_archivedDataWithRootObject:folderFont
-                                                requiringSecureCoding:YES];
-    [self setObject:archive forKey:MAPref_FolderListFont];
-	[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_FolderFontChange" object:folderFont];
-}
-
-/* setFolderListFontSize
- * Changes the size of the font used in the folder list.
- */
--(void)setFolderListFontSize:(NSInteger)newFontSize
-{
-	folderFont = [NSFont fontWithName:self.folderListFont size:newFontSize];
-    NSData *archive = [NSKeyedArchiver vna_archivedDataWithRootObject:folderFont
-                                                requiringSecureCoding:YES];
-    [self setObject:archive forKey:MAPref_FolderListFont];
-	[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_FolderFontChange" object:folderFont];
 }
 
 /* articleListFont
@@ -1011,7 +874,7 @@ static Preferences * _standardPreferences = nil;
     NSData *archive = [NSKeyedArchiver vna_archivedDataWithRootObject:articleFont
                                                 requiringSecureCoding:YES];
     [self setObject:archive forKey:MAPref_ArticleListFont];
-	[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_ArticleListFontChange" object:articleFont];
+	[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_ArticleListFontChange object:articleFont];
 }
 
 /* setArticleListFontSize
@@ -1023,7 +886,7 @@ static Preferences * _standardPreferences = nil;
     NSData *archive = [NSKeyedArchiver vna_archivedDataWithRootObject:articleFont
                                                 requiringSecureCoding:YES];
     [self setObject:archive forKey:MAPref_ArticleListFont];
-	[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_ArticleListFontChange" object:articleFont];
+	[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_ArticleListFontChange object:articleFont];
 }
 
 /* articleSortDescriptors
@@ -1039,13 +902,24 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setArticleSortDescriptors:(NSArray *)newSortDescriptors
 {
-	if (![articleSortDescriptors isEqualToArray:newSortDescriptors])
-	{
+    if (!newSortDescriptors) {
+        // Reset to registered default value.
+        articleSortDescriptors = [NSKeyedUnarchiver vna_unarchivedArrayOfObjectsOfClass:[NSSortDescriptor class]
+                                                                               fromData:[self objectForKey:MAPref_ArticleListSortOrders]];
+        // Securely decoded sort descriptors must be explicitely set to allow
+        // evaluation, otherwise an exception is thrown.
+        for (NSSortDescriptor *descriptor in articleSortDescriptors) {
+            [descriptor allowEvaluation];
+        }
+        return;
+    }
+
+	if (![articleSortDescriptors isEqualToArray:newSortDescriptors]) {
 		articleSortDescriptors = [newSortDescriptors copy];
         NSData *archive = [NSKeyedArchiver vna_archivedDataWithRootObject:articleSortDescriptors
                                                     requiringSecureCoding:YES];
         [self setObject:archive forKey:MAPref_ArticleListSortOrders];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
@@ -1062,11 +936,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setFoldersTreeSortMethod:(NSInteger)newMethod
 {
-	if (foldersTreeSortMethod != newMethod)
-	{
+	if (foldersTreeSortMethod != newMethod) {
 		foldersTreeSortMethod = newMethod;
 		[self setInteger:newMethod forKey:MAPref_AutoSortFoldersTree];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_AutoSortFoldersTreeChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_AutoSortFoldersTreeChange object:nil];
 	}
 }
 
@@ -1083,20 +956,11 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setNewArticlesNotification:(NSInteger)newMethod
 {
-	if (newMethod != newArticlesNotification)
-	{
+	if (newMethod != newArticlesNotification) {
 		newArticlesNotification = newMethod;
 		[self setInteger:newArticlesNotification forKey:MAPref_NewArticlesNotification];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
-}
-
-/* handleUpdateRestart
- * Called when Sparkle is about to restart Vienna.
- */
--(void)handleUpdateRestart
-{
-	[[NSUserDefaults standardUserDefaults] setObject:profilePath forKey:MAPref_Profile_Path];
 }
 
 /* showAppInStatusBar
@@ -1112,11 +976,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setShowAppInStatusBar:(BOOL)show
 {
-	if (showAppInStatusBar != show)
-	{
+	if (showAppInStatusBar != show) {
 		showAppInStatusBar = show;
 		[self setBool:showAppInStatusBar forKey:MAPref_ShowAppInStatusBar];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_ShowAppInStatusBarChanged" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_ShowAppInStatusBarChanged object:nil];
 	}
 }
 
@@ -1133,8 +996,7 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setShowStatusBar:(BOOL)show
 {
-	if (showStatusBar != show)
-	{
+	if (showStatusBar != show) {
 		showStatusBar = show;
 		[self setBool:showStatusBar forKey:MAPref_ShowStatusBar];
 	}
@@ -1153,11 +1015,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setShowFilterBar:(BOOL)show
 {
-	if (showFilterBar != show)
-	{
+	if (showFilterBar != show) {
 		showFilterBar = show;
 		[self setBool:showFilterBar forKey:MAPref_ShowFilterBar];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_FilterBarChanged" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_FilterBarChanged object:nil];
 	}
 }
 
@@ -1182,31 +1043,25 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setShouldSaveFeedSource:(BOOL)shouldSave
 {
-	if (shouldSaveFeedSource != shouldSave)
-	{
+	if (shouldSaveFeedSource != shouldSave) {
 		shouldSaveFeedSource = shouldSave;
-		if (shouldSaveFeedSource)
-		{
+		if (shouldSaveFeedSource) {
 			[self createFeedSourcesFolderIfNecessary];
 		}
 		[self setBool:shouldSaveFeedSource forKey:MAPref_ShouldSaveFeedSource];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_PreferenceChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_PreferenceChange object:nil];
 	}
 }
 
 -(void)createFeedSourcesFolderIfNecessary
 {	
 	BOOL isDirectory = NO;
-	if (![[NSFileManager defaultManager] fileExistsAtPath:feedSourcesFolder isDirectory:&isDirectory])
-	{
+	if (![[NSFileManager defaultManager] fileExistsAtPath:feedSourcesFolder isDirectory:&isDirectory]) {
 		NSError * error = nil;
-		if (![[NSFileManager defaultManager] createDirectoryAtPath:feedSourcesFolder withIntermediateDirectories:YES attributes:nil error:&error])
-		{
+		if (![[NSFileManager defaultManager] createDirectoryAtPath:feedSourcesFolder withIntermediateDirectories:YES attributes:nil error:&error]) {
 			NSLog(@"Could not create feed sources folder at path '%@'. Error: %@", feedSourcesFolder, error.localizedDescription);
 		}
-	}
-	else if (!isDirectory)
-	{
+	} else if (!isDirectory) {
 		// Huh, there's a Sources file there, but it's not a directory.
 		NSLog(@"Could not create feed sources folder, because a non-directory file already exists at path '%@'.", feedSourcesFolder);
 	}
@@ -1222,11 +1077,10 @@ static Preferences * _standardPreferences = nil;
 
 -(void)setSyncGoogleReader:(BOOL)flag 
 {
-    if (syncGoogleReader != flag) 
-    {
+    if (syncGoogleReader != flag) {
 		syncGoogleReader = flag;
 		[self setBool:syncGoogleReader forKey:MAPref_SyncGoogleReader];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_SyncGoogleReaderChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_SyncGoogleReaderChange object:nil];
 	}
 }
 
@@ -1240,11 +1094,10 @@ static Preferences * _standardPreferences = nil;
 
 -(void)setPrefersGoogleNewSubscription:(BOOL)flag
 {
-	if (prefersGoogleNewSubscription != flag)
-	{
+	if (prefersGoogleNewSubscription != flag) {
 		prefersGoogleNewSubscription = flag;
 		[self setBool:prefersGoogleNewSubscription forKey:MAPref_GoogleNewSubscription];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_GoogleReaderNewSubscriptionChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_GoogleReaderNewSubscriptionChange object:nil];
 	}
 }
 
@@ -1258,12 +1111,28 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setSyncServer:(NSString *)newServer
 {
-	if (![syncServer isEqualToString:newServer])
-	{
+	if (![syncServer isEqualToString:newServer]) {
 		syncServer = [newServer copy];
 		[self setString:syncServer forKey:MAPref_SyncServer];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_SyncGoogleReaderChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_SyncGoogleReaderChange object:nil];
 	}
+}
+
+-(NSString *)syncScheme
+{
+    return syncScheme;
+}
+
+/* setSyncServer
+ * Changes the scheme used for synchronization and sends a notification
+ */
+-(void)setSyncScheme:(NSString *)newScheme
+{
+    if (![syncScheme isEqualToString:newScheme]) {
+        syncScheme = [newScheme copy];
+        [self setString:syncScheme forKey:MAPref_SyncScheme];
+        [[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_SyncGoogleReaderChange object:nil];
+    }
 }
 
 -(NSString *)syncingUser
@@ -1276,11 +1145,10 @@ static Preferences * _standardPreferences = nil;
  */
 -(void)setSyncingUser:(NSString *)newUser
 {
-	if (![syncingUser isEqualToString:newUser])
-	{
+	if (![syncingUser isEqualToString:newUser]) {
 		syncingUser = [newUser copy];
 		[self setString:syncingUser forKey:MAPref_SyncingUser];
-		[[NSNotificationCenter defaultCenter] postNotificationName:@"MA_Notify_SyncGoogleReaderChange" object:nil];
+		[[NSNotificationCenter defaultCenter] postNotificationName:MA_Notify_SyncGoogleReaderChange object:nil];
 	}
 }
 

@@ -36,7 +36,7 @@ extension BrowserTab: RSSSource {
         }
     }
 
-    var rssSubscriber: RSSSubscriber? {
+    var rssSubscriber: (any RSSSubscriber)? {
         get {
             self.rssDelegate
         }
@@ -46,9 +46,9 @@ extension BrowserTab: RSSSource {
         }
     }
 
-    @IBAction private func subscribe(_ sender: NSObject? = nil) {
+    @IBAction private func subscribe(_ sender: Any) {
         if let rssSubscriber = self.rssSubscriber, !self.rssUrls.isEmpty {
-            if let sender = sender, sender as? NSView != nil || sender as? NSCell != nil {
+            if let sender = sender as? NSObject {
                 rssSubscriber.subscribeToRSS(self.rssUrls, uiElement: sender)
             } else {
                 rssSubscriber.subscribeToRSS(self.rssUrls)
@@ -78,14 +78,14 @@ extension BrowserTab: RSSSource {
         }
         // use javascript to detect RSS feed link
         // TODO: deal with multiple links
-        waitForAsyncExecution(until: DispatchTime.now() + DispatchTimeInterval.milliseconds(200)) { finishHandler in
-            self.webView.evaluateJavaScript(BrowserTab.extractRssLinkScript) { result, error in
+        waitForAsyncExecution(until: DispatchTime.now() + DispatchTimeInterval.milliseconds(200)) { [weak self] finishHandler in
+            self?.webView.evaluateJavaScript(BrowserTab.extractRssLinkScript) { result, error in
                 if error == nil, let result = result as? [String] {
                     // RSS feed link(s) detected
-                    self.rssUrls = result.compactMap { URL(string: $0 as String) }
+                    self?.rssUrls = result.compactMap { URL(string: $0 as String) }
                 } else {
                     // error or no rss url available
-                    self.rssUrls = []
+                    self?.rssUrls = []
                 }
                 finishHandler()
             }

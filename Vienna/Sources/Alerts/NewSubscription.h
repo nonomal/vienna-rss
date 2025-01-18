@@ -21,28 +21,8 @@
 @import Cocoa;
 
 @class Database;
-@class SubscriptionModel;
 
-@interface NewSubscription : NSWindowController {
-	IBOutlet NSTextField * linkTitle;
-	IBOutlet NSTextField * feedURL;
-	IBOutlet NSTextField * editFeedURL;
-	IBOutlet NSPopUpButton * feedSource;
-	IBOutlet NSButton * subscribeButton;
-	IBOutlet NSButton * saveButton;
-	IBOutlet NSButton * editCancelButton;
-	IBOutlet NSButton * subscribeCancelButton;
-	IBOutlet NSWindow * newRSSFeedWindow;
-	IBOutlet NSWindow * editRSSFeedWindow;
-	IBOutlet NSButton * siteHomePageButton;
-	BOOL googleOptionButton;
-	NSDictionary * sourcesDict;
-	Database * db;
-	NSInteger parentId;
-	NSInteger editFolderId;
-    SubscriptionModel *subscriptionModel;
-    
-}
+@interface NewSubscription : NSWindowController
 
 @property BOOL googleOptionButton;
 @property NSArray * topObjects;
@@ -58,7 +38,7 @@
 
 // General functions
 -(instancetype)initWithDatabase:(Database *)newDb /*NS_DESIGNATED_INITIALIZER*/;
--(void)newSubscription:(NSWindow *)window underParent:(NSInteger)itemId initialURL:(NSString *)initialURL;
+-(void)newSubscription:(NSWindow *)window initialURL:(NSString *)initialURL;
 -(void)editSubscription:(NSWindow *)window folderId:(NSInteger)folderId;
 
 @end

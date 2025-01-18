@@ -31,7 +31,7 @@ static NSString * const Body =
 @interface VNAArticleTests : XCTestCase
 
 @property (nonatomic, strong) Article *article;
-@property (nonatomic, strong) WebViewArticleConverter *articleConverter;
+@property (nonatomic, strong) WebKitArticleConverter *articleConverter;
 
 @end
 
@@ -42,7 +42,7 @@ static NSString * const Body =
     [super setUp];
 
     self.article = [[Article alloc] initWithGuid:GUID];
-    self.articleConverter = [[WebViewArticleConverter alloc] init];
+    self.articleConverter = [[WebKitArticleConverter alloc] init];
 }
 
 - (void)testAccessInstanceVariablesDirectly
@@ -73,22 +73,22 @@ static NSString * const Body =
     XCTAssertEqualObjects(self.article.link, Link);
 }
 
-- (void)testDate
+- (void)testLastUpdate
 {
     NSDate *date = [NSDate date];
 
-    self.article.date = date;
+    self.article.lastUpdate = date;
 
-    XCTAssertEqualObjects(self.article.date, date);
+    XCTAssertEqualObjects(self.article.lastUpdate, date);
 }
 
-- (void)testDateCreated
+- (void)testPublicationDate
 {
     NSDate *date = [NSDate date];
 
-    self.article.createdDate = date;
+    self.article.publicationDate = date;
 
-    XCTAssertEqualObjects(self.article.createdDate, date);
+    XCTAssertEqualObjects(self.article.publicationDate, date);
 }
 
 - (void)testBody
@@ -201,9 +201,9 @@ static NSString * const Body =
 - (void)testCompatibilityDate
 {
     NSDate *date = [NSDate date];
-    NSString *dateKeyPath = [@"articleData." stringByAppendingString:MA_Field_Date];
+    NSString *dateKeyPath = [@"articleData." stringByAppendingString:MA_Field_LastUpdate];
 
-    self.article.date = date;
+    self.article.lastUpdate = date;
 
     XCTAssertEqualObjects([self.article valueForKeyPath:dateKeyPath], date);
 }

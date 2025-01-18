@@ -20,32 +20,32 @@
 
 #import "TreeNode.h"
 #import "Preferences.h"
-#import "Constants.h"
 #import "Folder.h"
 #import "Vienna-Swift.h"
 
-@implementation TreeNode
-
-@synthesize progressIndicator;
+@implementation TreeNode {
+    TreeNode *parentNode;
+    NSMutableArray *children;
+    Folder *folder;
+    NSInteger nodeId;
+    BOOL canHaveChildren;
+}
 
 /* init
  * Initialises a treenode.
  */
 -(instancetype)init:(TreeNode *)parent atIndex:(NSInteger)insertIndex folder:(Folder *)theFolder canHaveChildren:(BOOL)childflag
 {
-	if ((self = [super init]) != nil)
- 	{
+	if ((self = [super init]) != nil) {
 		NSInteger folderId = (theFolder ? theFolder.itemId : VNAFolderTypeRoot);
 		folder = theFolder;
 		parentNode = parent;
 		canHaveChildren = childflag;
 		nodeId = folderId;
-		if (parent != nil)
-		{
+		if (parent != nil) {
 			[parent addChild:self atIndex:insertIndex];
 		}
 		children = [NSMutableArray array];
-		progressIndicator = nil;
 	}
 	return self;
 }
@@ -67,27 +67,23 @@
 	NSUInteger count = children.count;
 	NSInteger sortMethod = [Preferences standardPreferences].foldersTreeSortMethod;
 
-	if (sortMethod != VNAFolderSortManual)
-	{
+	if (sortMethod != VNAFolderSortManual) {
 		insertIndex = 0;
 
-		while (insertIndex < count)
-		{
+		while (insertIndex < count) {
 			TreeNode * theChild = children[insertIndex];
-			if (sortMethod == VNAFolderSortByName)
-			{
-				if ([child folderNameCompare:theChild] == NSOrderedAscending)
+			if (sortMethod == VNAFolderSortByName) {
+				if ([child folderNameCompare:theChild] == NSOrderedAscending) {
 					break;
-			}
-			else
-			{
+				}
+			} else {
 				NSAssert1(TRUE, @"Unsupported folder sort method in addChild: %ld", (long)sortMethod);
 			}
 			++insertIndex;
 		}
-	}
-	else if ((insertIndex < 0) || (insertIndex > count))
+	} else if ((insertIndex < 0) || (insertIndex > count)) {
 		insertIndex = count;
+	}
 	
 	child.parentNode = self;
 	[children insertObject:child atIndex:insertIndex];
@@ -99,8 +95,9 @@
  */
 -(void)removeChild:(TreeNode *)child andChildren:(BOOL)removeChildrenFlag
 {
-	if (removeChildrenFlag)
+	if (removeChildrenFlag) {
 		[child removeChildren];
+	}
 	[children removeObject:child];
 }
 
@@ -109,8 +106,7 @@
  */
 -(void)sortChildren:(NSInteger)sortMethod
 {
-	switch (sortMethod)
-	{
+	switch (sortMethod) {
 	case VNAFolderSortManual:
 		// Do nothing
 		break;
@@ -156,15 +152,16 @@
  */
 -(TreeNode *)nodeFromID:(NSInteger)n
 {
-	if (self.nodeId == n)
+	if (self.nodeId == n) {
 		return self;
+	}
 	
 	TreeNode * theNode;
 	
-	for (TreeNode * node in children)
-	{
-		if ((theNode = [node nodeFromID:n]) != nil)
+	for (TreeNode * node in children) {
+		if ((theNode = [node nodeFromID:n]) != nil) {
 			return theNode;
+		}
 	}
 	return nil;
 }
@@ -174,20 +171,20 @@
  */
 -(TreeNode *)childByName:(NSString *)childName
 {
-	for (TreeNode * node in children)
-	{
-		if ([childName isEqual:node.nodeName])
+	for (TreeNode * node in children) {
+		if ([childName isEqual:node.nodeName]) {
 			return node;
+		}
 	}
 	return nil;
 }
 
 /* childByIndex
- * Returns the TreeNode for the child at the specified index offset. (Note that we don't
- * assert index here. The objectAtIndex function will take care of that for us.)
+ * Returns the TreeNode for the child at the specified index offset.
  */
 -(TreeNode *)childByIndex:(NSInteger)index
 {
+	NSAssert(index>=0 && index < children.count, @"index beyond limits in childByIndex:");
 	return children[index];
 }
 
@@ -221,8 +218,9 @@
 -(TreeNode *)nextSibling
 {
 	NSInteger childIndex = [parentNode indexOfChild:self];
-	if (childIndex == NSNotFound || ++childIndex >= parentNode.countOfChildren)
+	if (childIndex == NSNotFound || ++childIndex >= parentNode.countOfChildren) {
 		return nil;
+	}
 	return [parentNode childByIndex:childIndex];
 }
 
@@ -231,8 +229,9 @@
  */
 -(TreeNode *)firstChild
 {
-	if (children.count == 0)
+	if (children.count == 0) {
 		return nil;
+	}
 	return children[0];
 }
 
@@ -317,38 +316,8 @@
  */
 -(NSString *)description
 {
-	return [NSString stringWithFormat:@"%@ (Parent=%p, # of children=%ld)",
+	return [NSString stringWithFormat:@"%@ (Parent=%@, # of children=%ld)",
             folder.name, parentNode, (unsigned long)children.count];
 }
-
-/* allocAndStartProgressIndicatorWithFrame:inView:
- * Allocate a new progress indicator and start it animating.
- */
--(void)allocAndStartProgressIndicatorWithFrame:(NSRect)frame inView:(NSView *)controlView
-{
-	// Allocate and initialize the spinning progress indicator.
-    progressIndicator = [[NSProgressIndicator alloc] initWithFrame:frame];
-    [controlView addSubview:progressIndicator];
-	// Start the animation.
-	[progressIndicator startAnimation:self];
-}
-
-/* stopAndReleaseProgressIndicator:
- * Stops the progress indicator and releases it, also calls recursively for child
- * nodes so that this can be called when a tree node is collapsed to stop the
- * progress indicators for all children.
- */
--(void)stopAndReleaseProgressIndicator
-{
-	if ( progressIndicator)
-	{
-		// Stop the animation and remove from the superview.
-		[progressIndicator stopAnimation:self];
-		[progressIndicator removeFromSuperviewWithoutNeedingDisplay];
-		
-		// Release the progress indicator.
-		progressIndicator = nil;
-	}
-}	
 
 @end

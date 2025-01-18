@@ -20,15 +20,9 @@
 
 @import Cocoa;
 
-@class ExtendedTableView;
+#import "TableViewExtensions.h"
 
-@interface DownloadWindow : NSWindowController <NSWindowDelegate,NSMenuDelegate,NSTableViewDelegate,NSTableViewDataSource> {
-	IBOutlet NSWindow * downloadWindow;
-	IBOutlet ExtendedTableView * table;
-	IBOutlet NSButton * clearButton;
-	NSInteger lastCount;
-	NSMenu * openWithMenu;
-}
+@interface DownloadWindow : NSWindowController <NSWindowDelegate, NSMenuDelegate, ExtendedTableViewDelegate, NSTableViewDataSource>
 
 // Public functions
 -(IBAction)clearList:(id)sender;

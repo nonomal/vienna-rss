@@ -19,55 +19,17 @@
 //
 
 @import Cocoa;
-@import WebKit;
 
 #import "BaseView.h"
 #import "ArticleBaseView.h"
 #import "ArticleViewDelegate.h"
 #import "MessageListView.h"
 
-@class AppController;
-@class ArticleView;
-@class EnclosureView;
-@protocol ArticleContentView;
-@protocol Tab;
-
-@interface ArticleListView : NSView<BaseView, ArticleBaseView, ArticleViewDelegate, MessageListViewDelegate, NSTableViewDataSource>
-{
-	IBOutlet MessageListView * articleList;
-	NSObject<ArticleContentView, Tab> *articleText;
-	IBOutlet NSSplitView * splitView2;
-	IBOutlet EnclosureView * enclosureView;
-
-	NSInteger tableLayout;
-	BOOL isAppInitialising;
-	BOOL isChangingOrientation;
-	BOOL isInTableInit;
-	BOOL blockSelectionHandler;
-
-	NSTimer * markReadTimer;
-	NSFont * articleListFont;
-	NSFont * articleListUnreadFont;
-	NSMutableDictionary * reportCellDict;
-	NSMutableDictionary * unreadReportCellDict;
-	NSMutableDictionary * selectionDict;
-	NSMutableDictionary * topLineDict;
-	NSMutableDictionary * linkLineDict;
-	NSMutableDictionary * middleLineDict;
-	NSMutableDictionary * bottomLineDict;
-	NSMutableDictionary * unreadTopLineDict;
-	NSMutableDictionary * unreadTopLineSelectionDict;
-
-	NSURL *	currentURL;
-	BOOL isLoadingHTMLArticle;
-	NSProgressIndicator * progressIndicator;
-}
+@interface ArticleListView : NSView <BaseView, ArticleBaseView, ArticleViewDelegate, MessageListViewDelegate, NSTableViewDataSource, ExtendedTableViewDelegate, NSSplitViewDelegate>
 
 // Public functions
 -(void)updateVisibleColumns;
 -(void)saveTableSettings;
 -(void)loadArticleLink:(NSString *) articleLink;
-- (void)webViewLoadFinished:(NSNotification *)notification;
-@property (readonly, nonatomic) NSURL *url;
 
 @end

@@ -29,8 +29,9 @@
 
 #import "OpenReader.h"
 
-#import <os/log.h>
+@import os.log;
 
+#import "Constants.h"
 #import "URLRequestExtensions.h"
 #import "Folder.h"
 #import "Database.h"
@@ -38,22 +39,12 @@
 #import "Preferences.h"
 #import "StringExtensions.h"
 #import "NSNotificationAdditions.h"
-#import "KeyChain.h"
+#import "Keychain.h"
 #import "ActivityItem.h"
 #import "Article.h"
 
-static NSString *LoginBaseURL = @"https://%@/accounts/ClientLogin?accountType=GOOGLE&service=reader";
-static NSString *ClientName = @"ViennaRSS";
-
-// host specific variables
-NSString *openReaderHost;
-NSString *username;
-NSString *password;
-NSString *APIBaseURL;
-BOOL hostSendsHexaItemId;
-BOOL hostRequiresSParameter;
-BOOL hostRequiresHexaForFeedId;
-BOOL hostRequiresInoreaderHeaders;
+static NSString * const LoginBaseURL = @"%@://%@/accounts/ClientLogin?accountType=GOOGLE&service=reader";
+static NSString * const ClientName = @"ViennaRSS";
 
 typedef NS_ENUM (NSInteger, OpenReaderStatus) {
     notAuthenticated = 0,
@@ -78,7 +69,20 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
 
 @end
 
-@implementation OpenReader
+@implementation OpenReader {
+    NSString *latestAlertDescription;
+
+    // host specific variables
+    NSString *openReaderHost;
+    NSString *openReaderScheme;
+    NSString *username;
+    NSString *password;
+    NSString *APIBaseURL;
+    BOOL hostSendsHexaItemId;
+    BOOL hostRequiresSParameter;
+    BOOL hostRequiresHexaForFeedId;
+    BOOL hostRequiresInoreaderHeaders;
+}
 
 # pragma mark initialization
 
@@ -89,6 +93,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
         // Initialization code here.
         _openReaderStatus = notAuthenticated;
         _countOfNewArticles = 0;
+        latestAlertDescription = @"";
         openReaderHost = nil;
         username = nil;
         password = nil;
@@ -109,11 +114,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         _openReader = [[OpenReader alloc] init];
-        Preferences *prefs = [Preferences standardPreferences];
-        if (prefs.syncGoogleReader) {
-            openReaderHost = prefs.syncServer;
-            APIBaseURL = [NSString stringWithFormat:@"https://%@/reader/api/0/", openReaderHost];
-        }
+        [_openReader configureForSpecificHost];
     });
     return _openReader;
 }
@@ -162,78 +163,88 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
         return;
     }
 
-    if (self.openReaderStatus == fullyAuthenticated || self.openReaderStatus == waitingTToken || self.openReaderStatus == missingTToken) {
-        [clientRequest addValue:[NSString stringWithFormat:@"GoogleLogin auth=%@",
-                                 self.clientAuthToken] forHTTPHeaderField:@"Authorization"];
-        return;     //we are already connected
-    } else if ((self.openReaderStatus == waitingClientToken) && clientAuthOperation != nil && !clientAuthOperation.isFinished) {
-        dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-        [clientRequest addValue:[NSString stringWithFormat:@"GoogleLogin auth=%@",
-                                 self.clientAuthToken] forHTTPHeaderField:@"Authorization"];
-        return;
-    } else {
-        // start first authentication
-        self.openReaderStatus = waitingClientToken;
-
+    switch (self.openReaderStatus) {
+    case fullyAuthenticated:
+    case waitingTToken:
+    case missingTToken:
+        break;
+    case waitingClientToken:
+        if (!clientAuthOperation.isFinished && sema != nil) {
+            dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+        }
+        break;
+    case notAuthenticated:
         [self configureForSpecificHost];
-        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:LoginBaseURL, openReaderHost]];
+        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:LoginBaseURL, openReaderScheme, openReaderHost]];
         NSMutableURLRequest *myRequest = [NSMutableURLRequest requestWithURL:url];
         myRequest.HTTPMethod = @"POST";
         [myRequest setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
         [self specificHeadersPrepare:myRequest];
+        username = [Preferences standardPreferences].syncingUser;
+        // restore from keychain
+        password = [VNAKeychain getGenericPasswordFromKeychain:username serviceName:@"Vienna sync"];
         [myRequest vna_setPostValue:username forKey:@"Email"];
         [myRequest vna_setPostValue:password forKey:@"Passwd"];
-
         // semaphore with count equal to zero for synchronizing completion of work
         sema = dispatch_semaphore_create(0);
-
+        // prepare authentication operation
         clientAuthOperation = [NSBlockOperation blockOperationWithBlock:^(void) {
             NSURLSessionDataTask * task = [[NSURLSession sharedSession] dataTaskWithRequest:myRequest
                 completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
                     self.openReaderStatus = notAuthenticated;
 					if (error) {
-						NSString * info = error.localizedDescription;
-						[[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_GoogleAuthFailed" object:info];
+						NSString * alertDescription = error.localizedDescription;
+						if (![alertDescription isEqualToString:self->latestAlertDescription]) {
+						    [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_GoogleAuthFailed object:alertDescription];
+						    self->latestAlertDescription = alertDescription;
+						}
 					} else if (((NSHTTPURLResponse *)response).statusCode != 200) {
-						NSString * info = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-						[[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_GoogleAuthFailed" object:info];
+						NSString * alertDescription = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+						if (![alertDescription isEqualToString:self->latestAlertDescription]) {
+						    [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_GoogleAuthFailed object:alertDescription];
+						    self->latestAlertDescription = alertDescription;
+						}
  					} else {         // statusCode 200
+						self->latestAlertDescription = @"";
 						NSString *response = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 						NSArray *components = [response componentsSeparatedByString:@"\n"];
 						for (NSString * item in components) {
 							if([item hasPrefix:@"Auth="]) {
 								self.clientAuthToken = [item substringFromIndex:5];
-								self.openReaderStatus = missingTToken;
+                                if ([self.clientAuthToken isEqualToString:@"(null)"] || [self.clientAuthToken isEqualToString:@""]) {
+                                    [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_GoogleAuthFailed object:@""];
+                                    self->latestAlertDescription = @"";
+								} else {
+								    self.openReaderStatus = missingTToken;								
+								}
 								break;
 							}
 						}
-
-						if (self.openReaderStatus == missingTToken && (self.clientAuthTimer == nil || !self.clientAuthTimer.valid)) {
-							//new request every 6 days
-							self.clientAuthTimer = [NSTimer scheduledTimerWithTimeInterval:6 * 24 * 3600
-																					target:self
-																				  selector:@selector(resetAuthentication)
-																				  userInfo:nil
-																				   repeats:YES];
-						}
-                    }  // if statusCode 200
-
+                        if (self.clientAuthTimer == nil || !self.clientAuthTimer.valid) {
+                            // new request every 6 days
+                            self.clientAuthTimer = [NSTimer scheduledTimerWithTimeInterval:6 * 24 * 3600
+                                                                                    target:self
+                                                                                  selector:@selector(resetAuthentication)
+                                                                                  userInfo:nil
+                                                                                   repeats:YES];
+                        }
+                    } // end error and statusCode tests
                     // Signal that we are done
                     dispatch_semaphore_signal(sema);
-
             }];
             task.priority = NSURLSessionTaskPriorityHigh;
             [task resume];
-
-        }];
-
+        }]; // end NSBlockOperation definition
+        self.openReaderStatus = waitingClientToken;
         self.statusMessage = NSLocalizedString(@"Authenticating on Open Reader", nil);
         clientAuthOperation.queuePriority = NSOperationQueuePriorityHigh;
         [clientAuthOperation start];
         // Now we wait until the task response block will send a signal
         dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-        [clientRequest addValue:[NSString stringWithFormat:@"GoogleLogin auth=%@", self.clientAuthToken] forHTTPHeaderField:@"Authorization"];
+        break;
     }
+
+    [clientRequest addValue:[NSString stringWithFormat:@"GoogleLogin auth=%@", self.clientAuthToken] forHTTPHeaderField:@"Authorization"];
 } // addClientTokenToRequest
 
 /* configures oneself regarding host, username and password
@@ -242,8 +253,11 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
 {
     // restore from Preferences
     Preferences *prefs = [Preferences standardPreferences];
-    username = prefs.syncingUser;
     openReaderHost = prefs.syncServer;
+    openReaderScheme = prefs.syncScheme;
+    if (!openReaderScheme) {
+        openReaderScheme = @"https";
+    }
     // default settings
     hostSendsHexaItemId = NO;
     hostRequiresSParameter = NO;
@@ -258,9 +272,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
     if ([openReaderHost rangeOfString:@"inoreader.com"].length != 0) {
         hostRequiresInoreaderHeaders = YES;
     }
-    // restore from keychain
-    password = [KeyChain getGenericPasswordFromKeychain:username serviceName:@"Vienna sync"];
-    APIBaseURL = [NSString stringWithFormat:@"https://%@/reader/api/0/", openReaderHost];
+    APIBaseURL = [NSString stringWithFormat:@"%@://%@/reader/api/0/", openReaderScheme, openReaderHost];
 } // configureForSpecificHost
 
 /* pass the T token
@@ -292,14 +304,18 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                     self.openReaderStatus = missingTToken;
                 } else {
                     self.tToken = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                    self.openReaderStatus = fullyAuthenticated;
-                    if (self.tTokenTimer == nil || !self.tTokenTimer.valid) {
-                        //tokens expire after 30 minutes : renew them every 25 minutes
-                        self.tTokenTimer = [NSTimer scheduledTimerWithTimeInterval:25 * 60
-                                                                            target:self
-                                                                          selector:@selector(renewTToken)
-                                                                          userInfo:nil
-                                                                           repeats:YES];
+                    if ([self.tToken isEqualToString:@"(null)"] || [self.tToken isEqualToString:@""]) {
+                        self.openReaderStatus = missingTToken;
+                    } else {
+                        self.openReaderStatus = fullyAuthenticated;
+                        if (self.tTokenTimer == nil || !self.tTokenTimer.valid) {
+                            //tokens expire after 30 minutes : renew them every 25 minutes
+                            self.tTokenTimer = [NSTimer scheduledTimerWithTimeInterval:25 * 60
+                                                                                target:self
+                                                                              selector:@selector(renewTToken)
+                                                                              userInfo:nil
+                                                                               repeats:YES];
+                        }
                     }
                 }
                 // Signal that we are done with the synchronous task
@@ -499,7 +515,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
     [refreshedFolder clearNonPersistedFlag:VNAFolderFlagUpdating];
     [refreshedFolder setNonPersistedFlag:VNAFolderFlagError];
     [refreshedFolder clearNonPersistedFlag:VNAFolderFlagSyncedOK]; // get ready for next request
-    [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_FoldersUpdated"
+    [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_FoldersUpdated
                                                                             object:@(refreshedFolder.itemId)];
 }
 
@@ -552,7 +568,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
             NSMutableArray *articleArray = [NSMutableArray array];
 
             for (NSDictionary *newsItem in (NSArray *)subscriptionsDict[@"items"]) {
-                NSDate *articleDate = [NSDate dateWithTimeIntervalSince1970:[newsItem[@"published"] doubleValue]];
+
                 NSString *articleGuid = newsItem[@"id"];
                 Article *article = [[Article alloc] initWithGuid:articleGuid];
                 article.folderId = refreshedFolder.itemId;
@@ -595,7 +611,15 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                     article.link = refreshedFolder.feedURL;
                 }
 
-                article.date = articleDate;
+                NSString *publishedField = newsItem[@"published"];
+                if (publishedField) {
+                    article.publicationDate = [NSDate dateWithTimeIntervalSince1970:[publishedField doubleValue]];
+                }
+
+                NSString * updatedField = newsItem[@"updated"];
+                if (updatedField) {
+                    article.lastUpdate = [NSDate dateWithTimeIntervalSince1970:[updatedField doubleValue]];
+                }
 
                 if ([newsItem[@"enclosure"] count] != 0) {
                     article.enclosure = newsItem[@"enclosure"][0][@"href"];
@@ -615,6 +639,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
 
             // Here's where we add the articles to the database
             if (articleArray.count > 0) {
+                [refreshedFolder resetArticleStatuses];
                 NSArray *guidHistory = [dbManager guidHistoryForFolderId:refreshedFolder.itemId];
 
                 for (Article *article in articleArray) {
@@ -678,7 +703,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
             [refreshedFolder setNonPersistedFlag:VNAFolderFlagError];
             [refreshedFolder clearNonPersistedFlag:VNAFolderFlagSyncedOK];
         }
-        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_FoldersUpdated"
+        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_FoldersUpdated
                                                                                 object:@(refreshedFolder.itemId)];
     });     //block for dispatch_async
 } // feedRequestDone
@@ -686,6 +711,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
 // callback
 -(void)readRequestDone:(NSMutableURLRequest *)request response:(NSURLResponse *)response data:(NSData *)data
 {
+    typeof(self) __weak weakSelf = self;
     dispatch_async(self.asyncQueue, ^() {
         Folder *refreshedFolder = ((NSDictionary *)[request vna_userInfo])[@"folder"];
         ActivityItem *aItem = ((NSDictionary *)[request vna_userInfo])[@"log"];
@@ -699,7 +725,8 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                 NSMutableArray *guidArray = [NSMutableArray arrayWithCapacity:itemRefsArray.count];
                 for (NSDictionary *itemRef in itemRefsArray) {
                     NSString *guid;
-                    if (hostSendsHexaItemId) {
+                    typeof(self) strongSelf = weakSelf;
+                    if (strongSelf && strongSelf->hostSendsHexaItemId) {
                         guid = [NSString stringWithFormat:@"tag:google.com,2005:reader/item/%@", itemRef[@"id"]];
                     } else {
                         // as described in http://code.google.com/p/google-reader-api/wiki/ItemId
@@ -725,7 +752,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                 });
                 [refreshedFolder clearNonPersistedFlag:VNAFolderFlagUpdating];
                 [refreshedFolder setNonPersistedFlag:VNAFolderFlagError];
-                [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_FoldersUpdated" object:@(
+                [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_FoldersUpdated object:@(
                      refreshedFolder.itemId)];
                 return;
             } // try/catch
@@ -744,14 +771,13 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
             [refreshedFolder clearNonPersistedFlag:VNAFolderFlagUpdating];
             [refreshedFolder setNonPersistedFlag:VNAFolderFlagError];
         }
-        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_FoldersUpdated"
-                                                                                object:@(refreshedFolder.itemId)];
     });     //block for dispatch_async
 } // readRequestDone
 
 // callback
 -(void)starredRequestDone:(NSMutableURLRequest *)request response:(NSURLResponse *)response data:(NSData *)data
 {
+    typeof(self) __weak weakSelf = self;
     dispatch_async(self.asyncQueue, ^() {
         Folder *refreshedFolder = ((NSDictionary *)[request vna_userInfo])[@"folder"];
         ActivityItem *aItem = ((NSDictionary *)[request vna_userInfo])[@"log"];
@@ -765,7 +791,8 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                 NSMutableArray *guidArray = [NSMutableArray arrayWithCapacity:itemRefsArray.count];
                 for (NSDictionary *itemRef in itemRefsArray) {
                     NSString *guid;
-                    if (hostSendsHexaItemId) {
+                    typeof(self) strongSelf = weakSelf;
+                    if (strongSelf && strongSelf->hostSendsHexaItemId) {
                         guid = [NSString stringWithFormat:@"tag:google.com,2005:reader/item/%@", itemRef[@"id"]];
                     } else {
                         // as described in http://code.google.com/p/google-reader-api/wiki/ItemId
@@ -776,8 +803,6 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                     [guidArray addObject:guid];
                     [[refreshedFolder articleFromGuid:guid] markFlagged:YES];
                 }
-                [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_ArticleListContentChange" object:@(
-                     refreshedFolder.itemId)];
 
                 [[Database sharedManager] markStarredArticlesFromFolder:refreshedFolder guidArray:guidArray];
 
@@ -799,7 +824,8 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
             [refreshedFolder clearNonPersistedFlag:VNAFolderFlagUpdating];
             [refreshedFolder setNonPersistedFlag:VNAFolderFlagError];
         }
-        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_FoldersUpdated"
+        // mark end of feed refresh
+        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_FoldersUpdated
                                                                                 object:@(refreshedFolder.itemId)];
     });     //block for dispatch_async
 } // starredRequestDone
@@ -895,7 +921,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
             if (hostRequiresHexaForFeedId) {                     // TheOldReader
                 NSString *identifier =
                   [feedID stringByReplacingOccurrencesOfString:@"feed/" withString:@"" options:0 range:NSMakeRange(0, 5)];
-                legacyKey = [NSString stringWithFormat:@"https://%@/reader/public/atom/%@", openReaderHost, identifier];
+                legacyKey = [NSString stringWithFormat:@"%@://%@/reader/public/atom/%@", openReaderScheme, openReaderHost, identifier];
             } else {
                 legacyKey = feedURL;
             }
@@ -928,7 +954,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                         neededParentId = VNAFolderTypeRoot;
                     }
                     if (localFolder.parentId != neededParentId) {
-                        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:@"MA_Notify_OpenReaderFolderChange"
+                        [[NSNotificationCenter defaultCenter] vna_postNotificationOnMainThreadWithName:MA_Notify_OpenReaderFolderChange
                                                               object:@[ [NSNumber numberWithInteger:nativeId],
                                                                         [NSNumber numberWithInteger:neededParentId],
                                                                         [NSNumber numberWithInteger:0]]];
@@ -961,11 +987,13 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
     NSDictionary *unreadDict;
     NSError *jsonError;
     unreadDict = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&jsonError];
+    NSMutableArray *remoteUnreadFeeds = [NSMutableArray array];
     for (NSDictionary *feed in unreadDict[@"unreadcounts"]) {
         NSString *feedID = feed[@"id"];
         if ([feedID hasPrefix:@"feed/"]) {
             Folder *folder = [[Database sharedManager] folderFromRemoteId:feedID];
             if (folder) {
+                [remoteUnreadFeeds addObject:feedID];
                 NSInteger remoteCount = ((NSString *)feed[@"count"]).intValue;
                 NSInteger localCount = folder.unreadCount;
                 NSInteger remoteTimestamp = ((NSString *)feed[@"newestItemTimestampUsec"]).longLongValue / 1000000; // convert in truncated seconds
@@ -981,6 +1009,14 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
                     [folder clearNonPersistedFlag:VNAFolderFlagSyncedOK];
                 }
             }
+        }
+    }
+
+    NSArray *localFolders = [Database sharedManager].arrayOfAllFolders;
+    for (Folder *folder in localFolders) {
+        // folders which are locally marked as having unread articles, while they are remotely all read
+        if (folder.isOpenReaderFolder && folder.unreadCount > 0 && ![remoteUnreadFeeds containsObject:folder.remoteId]) {
+            [folder clearNonPersistedFlag:VNAFolderFlagSyncedOK];
         }
     }
 } // unreadCountDone
@@ -1118,8 +1154,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
         [[Database sharedManager] markArticleRead:article.folderId guid:article.guid isRead:readFlag];
         [article markRead:readFlag];
         NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-        [nc vna_postNotificationOnMainThreadWithName:@"MA_Notify_FoldersUpdated" object:@(article.folderId)];
-        [nc vna_postNotificationOnMainThreadWithName:@"MA_Notify_ArticleListStateChange" object:@(article.folderId)];
+        [nc vna_postNotificationOnMainThreadWithName:MA_Notify_ArticleListStateChange object:@(article.folderId)];
     }
 }
 
@@ -1160,7 +1195,7 @@ typedef NS_ENUM (NSInteger, OpenReaderStatus) {
         Folder *folder = ((NSDictionary *)[request vna_userInfo])[@"folder"];
         [[Database sharedManager] markFolderRead:folder.itemId];
         NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-        [nc vna_postNotificationOnMainThreadWithName:@"MA_Notify_ArticleListStateChange" object:@(folder.itemId)];
+        [nc vna_postNotificationOnMainThreadWithName:MA_Notify_ArticleListStateChange object:@(folder.itemId)];
     }
 }
 

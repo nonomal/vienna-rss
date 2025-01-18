@@ -20,52 +20,25 @@
 
 @import Cocoa;
 @import Sparkle;
-@import WebKit;
 
 #define APPCONTROLLER ((AppController *)[NSApp delegate])
 #define APP ((ViennaApp *)NSApp)
 
 @class FoldersTree;
-@class SmartFolder;
 @class NewSubscription;
-@class NewGroupFolder;
-@class WebPreferences;
-@class EmptyTrashWarning;
-@class SearchPanel;
 @class DisclosureView;
 @class PluginManager;
 @class SearchMethod;
 @class Database;
 @class ArticleController;
-@class DownloadWindow;
 @class Article;
 @class UnifiedDisplayView;
 @class ArticleListView;
 @protocol Browser;
 
-@interface AppController : NSObject <NSApplicationDelegate>
-{
-	IBOutlet NSMenuItem * closeTabItem;
-	IBOutlet NSMenuItem * closeAllTabsItem;
-	IBOutlet NSMenuItem * closeWindowItem;
-	IBOutlet NSMenuItem * sortByMenu;
-	IBOutlet NSMenuItem * columnsMenu;
-
-	DownloadWindow * downloadWindow;
-	SmartFolder * smartFolder;
-	NewGroupFolder * groupFolder;
-	EmptyTrashWarning * emptyTrashWarning;
-	SearchPanel * searchPanel;
-	
-	Database * db;
-	NSMutableDictionary * scriptPathMappings;
-	NSStatusItem * appStatusItem;
-	NSInteger lastCountOfUnread;
-	NSMenuItem * scriptsMenuItem;
-	BOOL didCompleteInitialisation;
-	NSString * searchString;
-    
-    NewSubscription * _rssFeed;
+@interface AppController : NSObject <NSApplicationDelegate> {
+#pragma clang diagnostic ignored "-Wobjc-interface-ivars"
+    Database *db;
 }
 
 @property (nonatomic) IBOutlet SPUStandardUpdaterController *sparkleController;
@@ -103,8 +76,6 @@
 -(IBAction)openHomePage:(id)sender;
 -(IBAction)viewArticlePages:(id)sender;
 -(IBAction)viewArticlePagesInAlternateBrowser:(id)sender;
--(IBAction)openWebElementInNewTab:(id)sender;
--(IBAction)openWebElementInDefaultBrowser:(id)sender;
 -(IBAction)doSelectScript:(id)sender;
 -(IBAction)doSelectStyle:(id)sender;
 -(IBAction)doOpenScriptsFolder:(id)sender;
@@ -128,8 +99,6 @@
 -(IBAction)restoreMessage:(id)sender;
 -(IBAction)skipFolder:(id)sender;
 -(IBAction)showDownloadsWindow:(id)sender;
--(IBAction)conditionalShowDownloadsWindow:(id)sender;
--(IBAction)mailLinkToArticlePage:(id)sender;
 -(IBAction)openWebLocation:(id)sender;
 -(IBAction)getInfo:(id)sender;
 -(IBAction)unsubscribeFeed:(id)sender;
@@ -147,10 +116,9 @@
 -(IBAction)keepFoldersArranged:(id)sender;
 -(IBAction)exportSubscriptions:(id)sender;
 -(IBAction)importSubscriptions:(id)sender;
-
+- (IBAction)searchUsingTreeFilter:(id)sender;
 
 // Public functions
--(NSArray *)contextMenuItemsForElement:(NSDictionary *)element defaultMenuItems:(NSArray *)defaultMenuItems;
 -(void)showUnreadCountOnApplicationIconAndWindowTitle;
 -(void)openURLFromString:(NSString *)urlString inPreferredBrowser:(BOOL)openInPreferredBrowserFlag;
 -(void)openURL:(NSURL *)url inPreferredBrowser:(BOOL)openInPreferredBrowserFlag;
@@ -172,7 +140,6 @@
 @property (readonly, nonatomic) NSArray *folders;
 -(void)blogWithExternalEditor:(NSString *)externalEditorBundleIdentifier;
 -(void)updateStatusBarFilterButtonVisibility;
-@property (nonatomic, readonly) NSLayoutManager *layoutManager;
 -(void)performWebSearch:(SearchMethod *)searchMethod;
 -(void)performAllArticlesSearch;
 -(void)performWebPageSearch;

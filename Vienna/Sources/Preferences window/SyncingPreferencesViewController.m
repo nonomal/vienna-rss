@@ -18,25 +18,39 @@
 //  limitations under the License.
 //
 
+#import "SyncingPreferencesViewController.h"
+
+#import "Constants.h"
 #import "OpenReader.h"
-#import "KeyChain.h"
+#import "Keychain.h"
 #import "Preferences.h"
 #import "StringExtensions.h"
-#import "SyncingPreferencesViewController.h"
 
 @interface SyncingPreferencesViewController ()
 
 @end
 
-@implementation SyncingPreferencesViewController
-static BOOL _credentialsChanged;
+@implementation SyncingPreferencesViewController {
+    IBOutlet NSPopUpButton *openReaderSource; // List of known service providers
+    NSDictionary *sourcesDict;
+    IBOutlet NSTextField *credentialsInfoText;
+    IBOutlet NSTextField *openReaderHost;
+    IBOutlet NSTextField *username;
+    IBOutlet NSSecureTextField *password;
+    IBOutlet NSButton *__weak syncButton;
+    BOOL _credentialsChanged;
+    NSString *syncScheme;
+    NSString *serverAndPath;
+    NSURL *serverURL;
+    NSString *syncingUser;
+}
 
 @synthesize syncButton;
 
 - (void)viewWillAppear {
     // Set up to be notified
     NSNotificationCenter * nc = [NSNotificationCenter defaultCenter];
-    [nc addObserver:self selector:@selector(handleGoogleAuthFailed:) name:@"MA_Notify_GoogleAuthFailed" object:nil];
+    [nc addObserver:self selector:@selector(handleGoogleAuthFailed:) name:MA_Notify_GoogleAuthFailed object:nil];
     [nc addObserver:self selector:@selector(handleServerTextDidChange:) name:NSControlTextDidChangeNotification object:openReaderHost];
     [nc addObserver:self selector:@selector(handleUserTextDidChange:) name:NSControlTextDidChangeNotification object:username];
     [nc addObserver:self selector:@selector(handlePasswordTextDidChange:) name:NSControlTextDidChangeNotification object:password];
@@ -50,21 +64,28 @@ static BOOL _credentialsChanged;
     // restore from Preferences and from keychain
     Preferences * prefs = [Preferences standardPreferences];
     syncButton.state = prefs.syncGoogleReader ? NSControlStateValueOn : NSControlStateValueOff;
-    NSString * theUsername = prefs.syncingUser;
-    if (!theUsername)
-        theUsername=@"";
-    NSString * theHost = prefs.syncServer;
-    if (!theHost)
-        theHost=@"";
-    NSString * thePassword = [KeyChain getGenericPasswordFromKeychain:theUsername serviceName:@"Vienna sync"];
-    if (!thePassword)
+    syncingUser = prefs.syncingUser;
+    if (!syncingUser) {
+        syncingUser=@"";
+    }
+    syncScheme = prefs.syncScheme;
+    if (!syncScheme) {
+        syncScheme = @"https";
+    }
+    serverAndPath = prefs.syncServer;
+    if (!serverAndPath) {
+        serverAndPath=@"";
+    }
+    serverURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", syncScheme, serverAndPath]];
+    NSString * thePassword = [VNAKeychain getGenericPasswordFromKeychain:syncingUser serviceName:@"Vienna sync"];
+    if (!thePassword) {
         thePassword=@"";
-    username.stringValue = theUsername;
-    openReaderHost.stringValue = theHost;
+    }
+    username.stringValue = syncingUser;
+    openReaderHost.stringValue = serverAndPath;
     password.stringValue = thePassword;
     
-    if(!prefs.syncGoogleReader)
-    {
+    if (!prefs.syncGoogleReader) {
         [openReaderSource setEnabled:NO];
         [openReaderHost setEnabled:NO];
         [username setEnabled:NO];
@@ -76,38 +97,34 @@ static BOOL _credentialsChanged;
     // is a dictionary with display names which act as keys, host names and a help text
     // regarding credentials to enter. This allows us to support additional service
     // providers without having to write new code.
-    if (!sourcesDict)
-    {
-        NSBundle *thisBundle = [NSBundle bundleForClass:[self class]];
-        NSString * pathToPList = [thisBundle pathForResource:@"KnownSyncServers" ofType:@"plist"];
-        if (pathToPList != nil)
-        {
-            sourcesDict = [NSDictionary dictionaryWithContentsOfFile:pathToPList];
+    if (!sourcesDict) {
+        NSURL *plistURL = [NSBundle.mainBundle URLForResource:@"KnownSyncServers"
+                                                withExtension:@"plist"];
+        if (plistURL) {
+            sourcesDict = [NSDictionary dictionaryWithContentsOfURL:plistURL
+                                                              error:NULL];
             [openReaderSource removeAllItems];
-            if (sourcesDict)
-            {
+            if (sourcesDict) {
                 [openReaderSource setEnabled:YES];
                 BOOL match = NO;
-                for (NSString * key in sourcesDict)
-                {
+                for (NSString * key in sourcesDict) {
                     [openReaderSource addItemWithTitle:key];
                     NSDictionary * itemDict = [sourcesDict valueForKey:key];
-                    if ([theHost isEqualToString:[itemDict valueForKey:@"Address"]])
-                    {
+                    if ([serverAndPath isEqualToString:[itemDict valueForKey:@"Address"]]) {
                         [openReaderSource selectItemWithTitle:key];
                         [self changeSource:nil];
                         match = YES;
                     }
                 }
-                if (!match)
-                {
+                if (!match) {
                     [openReaderSource selectItemWithTitle:NSLocalizedString(@"Other", nil)];
-                    openReaderHost.stringValue = theHost;
+                    [self changeSource:nil];
+                    openReaderHost.stringValue = serverURL.absoluteString;
                 }
             }
-        }
-        else
+        } else {
             [openReaderSource setEnabled:NO];
+        }
     }
     
 }
@@ -118,8 +135,11 @@ static BOOL _credentialsChanged;
 -(void)viewWillDisappear
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    if(syncButton.state == NSControlStateValueOn && _credentialsChanged)
-    {
+    Preferences * prefs = [Preferences standardPreferences];
+    prefs.syncScheme = syncScheme;
+    prefs.syncServer = serverAndPath;
+    prefs.syncingUser = syncingUser;
+    if (syncButton.state == NSControlStateValueOn && _credentialsChanged) {
         [[OpenReader sharedManager] resetAuthentication];
         [[OpenReader sharedManager] loadSubscriptions];
     }
@@ -133,15 +153,13 @@ static BOOL _credentialsChanged;
     BOOL sync = [sender state] == NSControlStateValueOn;
     Preferences *prefs = [Preferences standardPreferences];
     prefs.syncGoogleReader = sync;
-    [prefs savePreferences];
     if (sync) {
         [openReaderSource setEnabled:YES];
         [openReaderHost setEnabled:YES];
         [username setEnabled:YES];
         [password setEnabled:YES];
         _credentialsChanged = YES;
-    }
-    else {
+    } else {
         [openReaderSource setEnabled:NO];
         [openReaderHost setEnabled:NO];
         [username setEnabled:NO];
@@ -156,21 +174,23 @@ static BOOL _credentialsChanged;
     NSString * key = readerItem.title;
     NSDictionary * itemDict = [sourcesDict valueForKey:key];
     NSString* hostName = [itemDict valueForKey:@"Address"];
-    if (!hostName)
+    if (!hostName) {
         hostName=@"";
+    }
     NSString* hint = [itemDict valueForKey:@"Hint"];
-    if (!hint)
+    if (!hint) {
         hint=@"";
+    }
     openReaderHost.stringValue = hostName;
     credentialsInfoText.stringValue = hint;
-    if (sender != nil)	//user action
+    if (sender != nil) {	//user action
         [self handleServerTextDidChange:nil];
+    }
 }
 
 - (IBAction)visitWebsite:(id)sender
 {
-    NSURL * url = [NSURL URLWithString:[NSString stringWithFormat:@"https://%@/", openReaderHost.stringValue]];
-    [[NSWorkspace sharedWorkspace] openURL:url];
+    [[NSWorkspace sharedWorkspace] openURL:serverURL];
 }
 
 /* handleServerTextDidChange [delegate]
@@ -181,19 +201,28 @@ static BOOL _credentialsChanged;
 -(void)handleServerTextDidChange:(NSNotification *)aNotification
 {
     _credentialsChanged = YES;
-    Preferences *prefs = [Preferences standardPreferences];
-    if ( !((openReaderHost.stringValue).vna_isBlank || (username.stringValue).vna_isBlank) )
-    {
+    NSString *theString  = openReaderHost.stringValue.vna_trimmed;
+    NSURL *url = [NSURL URLWithString:theString];
+    if (url.scheme) {
+        syncScheme = url.scheme;
+        if (url.host) {
+            serverAndPath = [theString substringFromIndex:[theString rangeOfString:url.host].location];
+        } else {
+            serverAndPath = @"";
+        }
+    } else {
+        syncScheme = @"https";
+        serverAndPath = theString;
+    }
+    serverURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@://%@", syncScheme, serverAndPath]];
+    if (!openReaderHost.stringValue.vna_isBlank && !username.stringValue.vna_isBlank && password.stringValue.vna_isBlank) {
         // can we get password via keychain ?
-        NSString * thePass = [KeyChain getWebPasswordFromKeychain:username.stringValue url:[NSString stringWithFormat:@"https://%@", openReaderHost.stringValue]];
-        if (!thePass.vna_isBlank)
-        {
+        NSString * thePass = [VNAKeychain getWebPasswordFromKeychain:username.stringValue url:[NSString stringWithFormat:@"%@://%@", syncScheme, serverURL.host]];
+        if (!thePass.vna_isBlank) {
             password.stringValue = thePass;
-            [KeyChain setGenericPasswordInKeychain:password.stringValue username:username.stringValue service:@"Vienna sync"];
+            [VNAKeychain setGenericPasswordInKeychain:thePass username:username.stringValue service:@"Vienna sync"];
         }
     }
-    prefs.syncServer = openReaderHost.stringValue;
-    [prefs savePreferences];
 }
 
 /* handleUserTextDidChange [delegate]
@@ -205,19 +234,16 @@ static BOOL _credentialsChanged;
 {
     _credentialsChanged = YES;
     Preferences *prefs = [Preferences standardPreferences];
-    [KeyChain deleteGenericPasswordInKeychain:prefs.syncingUser service:@"Vienna sync"];
-    if ( !((openReaderHost.stringValue).vna_isBlank || (username.stringValue).vna_isBlank) )
-    {
+    [VNAKeychain deleteGenericPasswordInKeychain:prefs.syncingUser service:@"Vienna sync"];
+    if (!openReaderHost.stringValue.vna_isBlank && !username.stringValue.vna_isBlank && password.stringValue.vna_isBlank) {
         // can we get password via keychain ?
-        NSString * thePass = [KeyChain getWebPasswordFromKeychain:username.stringValue url:[NSString stringWithFormat:@"https://%@", openReaderHost.stringValue]];
-        if (!thePass.vna_isBlank)
-        {
+        NSString * thePass = [VNAKeychain getWebPasswordFromKeychain:username.stringValue url:[NSString stringWithFormat:@"%@://%@", syncScheme, serverURL.host]];
+        if (!thePass.vna_isBlank) {
             password.stringValue = thePass;
-            [KeyChain setGenericPasswordInKeychain:password.stringValue username:username.stringValue service:@"Vienna sync"];
+            [VNAKeychain setGenericPasswordInKeychain:password.stringValue username:username.stringValue service:@"Vienna sync"];
         }
     }
-    prefs.syncingUser = username.stringValue;
-    [prefs savePreferences];
+    syncingUser = username.stringValue;
 }
 
 /* handlePasswordTextDidChange [delegate]
@@ -228,13 +254,12 @@ static BOOL _credentialsChanged;
 -(void)handlePasswordTextDidChange:(NSNotification *)aNotification
 {
     _credentialsChanged = YES;
-    [KeyChain setGenericPasswordInKeychain:password.stringValue username:username.stringValue service:@"Vienna sync"];
+    [VNAKeychain setGenericPasswordInKeychain:password.stringValue username:username.stringValue service:@"Vienna sync"];
 }
 
 -(void)handleGoogleAuthFailed:(NSNotification *)nc
 {    
-    if (self.view.window.visible)
-    {
+    if (self.view.window.visible) {
         NSAlert *alert = [NSAlert new];
         alert.messageText = NSLocalizedString(@"Open Reader Authentication Failed",nil);
         if (![nc.object isEqualToString:@""]) {

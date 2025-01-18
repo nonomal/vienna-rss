@@ -140,13 +140,13 @@ extension BrowserTab {
     }
 
     func updateTabTitle() {
-        if self.url != webView.url || self.url == nil {
+        if self.url != webView.url || webView.url == nil {
             // Currently loading (the first time), webview title not yet correct / available
             self.title = self.url?.host ?? NSLocalizedString("New Tab", comment: "")
         } else if let title = self.webView.title, !title.isEmpty {
             self.title = title
-        } else {
-            // Webview is about:blank or empty
+        } else if (self.title ?? "").isEmpty {
+            // we haven't yet set a title and Webview is about:blank or empty
             self.title = NSLocalizedString("New Tab", comment: "")
         }
     }
@@ -165,4 +165,24 @@ extension BrowserTab {
 extension BrowserTab: NSTextFieldDelegate {
     // TODO: things like address suggestion etc
     // TODO: restore url string when user presses escape in textfield, make webview first responder
+}
+
+// MARK: hover link ui
+
+extension BrowserTab: CustomWKHoverUIDelegate {
+
+    func viewDidLoadHoverLinkUI() {
+        registerNavigationStartHandler { [weak self] in
+            // TODO: Is it really necessary to do this on every navigation start instead of only once after webview initialization?
+            self?.webView.hoverUiDelegate = self
+            self?.statusBar?.label = ""
+        }
+    }
+
+    func hovered(link: String?) {
+        guard let statusBar = statusBar else {
+            return
+        }
+        statusBar.label = link
+    }
 }

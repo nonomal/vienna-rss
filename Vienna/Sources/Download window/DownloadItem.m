@@ -20,8 +20,10 @@
 
 #import "DownloadItem.h"
 
-static NSString *const VNACodingKeyFilename = @"filename";
-static NSString *const VNACodingKeySize = @"size";
+@import UniformTypeIdentifiers;
+
+static NSString * const VNACodingKeyFilename = @"filename";
+static NSString * const VNACodingKeySize = @"size";
 
 @interface DownloadItem ()
 
@@ -43,7 +45,12 @@ static NSString *const VNACodingKeySize = @"size";
 {
     if (!_image) {
         NSString *extension = self.filename.pathExtension;
-        _image = [NSWorkspace.sharedWorkspace iconForFileType:extension];
+        if (@available(macOS 11, *)) {
+            UTType *contentType = [UTType typeWithFilenameExtension:extension];
+            _image = [NSWorkspace.sharedWorkspace iconForContentType:contentType];
+        } else {
+            _image = [NSWorkspace.sharedWorkspace iconForFileType:extension];
+        }
         if (!_image.valid) {
             _image = nil;
         } else {
@@ -78,7 +85,9 @@ static NSString *const VNACodingKeySize = @"size";
             // the order in which they were encoded. Changing the code below can
             // lead to decoding failure.
             _filename = [coder decodeObject];
-            [coder decodeValueOfObjCType:@encode(long long) at:&_size];
+            [coder decodeValueOfObjCType:@encode(long long)
+                                      at:&_size
+                                    size:sizeof(long long)];
         }
         _state = DownloadStateCompleted;
     }

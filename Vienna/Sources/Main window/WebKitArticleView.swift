@@ -22,12 +22,12 @@ import WebKit
 
 class WebKitArticleView: CustomWKWebView, ArticleContentView, WKNavigationDelegate, CustomWKUIDelegate {
 
-    var listView: ArticleViewDelegate?
+    var listView: (any ArticleViewDelegate)?
 
     var articles: [Article] = [] {
         didSet {
             guard !articles.isEmpty else {
-                self.clearHTML()
+                self.loadHTMLString("<html><meta name=\"color-scheme\" content=\"light dark\"><body></body></html>", baseURL: URL.blank)
                 return
             }
 
@@ -43,7 +43,7 @@ class WebKitArticleView: CustomWKWebView, ArticleContentView, WKNavigationDelega
 
     let converter = WebKitArticleConverter()
 
-    let contextMenuCustomizer: BrowserContextMenuDelegate = WebKitContextMenuCustomizer()
+    let contextMenuCustomizer: any BrowserContextMenuDelegate = WebKitContextMenuCustomizer()
 
     @objc
     init(frame: NSRect) {
@@ -67,7 +67,19 @@ class WebKitArticleView: CustomWKWebView, ArticleContentView, WKNavigationDelega
 
     /// handle special keys when the article view has the focus
     override func keyDown(with event: NSEvent) {
-        if let pressedKeys = event.characters, pressedKeys.count == 1 {
+        var interceptKey = true
+        waitForAsyncExecution(until: DispatchTime.now() + DispatchTimeInterval.milliseconds(200)) { finishHandler in
+            self.evaluateJavaScript("document.activeElement.tagName") { res, _ in
+                guard let res = res as? String else {
+                    return
+                }
+                if ["INPUT", "TEXTAREA"].contains(res) {
+                    interceptKey = false
+                }
+                finishHandler()
+            }
+        }
+        if interceptKey, let pressedKeys = event.characters, pressedKeys.count == 1 {
             let pressedKey = (pressedKeys as NSString).character(at: 0)
             // give app controller preference when handling commands
             if NSApp.appController.handleKeyDown(pressedKey, withFlags: event.modifierFlags.rawValue) {
@@ -76,11 +88,6 @@ class WebKitArticleView: CustomWKWebView, ArticleContentView, WKNavigationDelega
         }
         super.keyDown(with: event)
     }
-
-    func clearHTML() {
-        deleteHtmlFile()
-        load(URLRequest(url: URL.blank))
-     }
 
     func resetTextSize() {
         makeTextStandardSize(self)
@@ -117,34 +124,14 @@ class WebKitArticleView: CustomWKWebView, ArticleContentView, WKNavigationDelega
 
     // MARK: CustomWKUIDelegate
 
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        let browser = NSApp.appController.browser
-        if let webKitBrowser = browser as? TabbedBrowserViewController {
-            let newTab = webKitBrowser.createNewTab(navigationAction.request, config: configuration, inBackground: false)
-            if let webView = webView as? CustomWKWebView {
-                // The listeners are removed from the old webview userContentController on creating the new one, restore them
-                webView.resetScriptListeners()
-            }
-            return (newTab as? BrowserTab)?.webView
-        } else {
-            // Fallback for old browser
-            _ = browser?.createNewTab(navigationAction.request.url, inBackground: false, load: false)
-            return nil
-        }
-    }
-
     func contextMenuItemsFor(purpose: WKWebViewContextMenuContext, existingMenuItems: [NSMenuItem]) -> [NSMenuItem] {
         var menuItems = existingMenuItems
         switch purpose {
-        case .page(url: _):
-            break
         case .link(let url):
             addLinkMenuCustomizations(&menuItems, url)
-        case .picture:
-            break
-        case .pictureLink(image: _, link: let link):
+        case .mediaLink(media: _, link: let link):
             addLinkMenuCustomizations(&menuItems, link)
-        case .text:
+        default:
             break
         }
         return contextMenuCustomizer.contextMenuItemsFor(purpose: purpose, existingMenuItems: menuItems)
@@ -156,35 +143,25 @@ class WebKitArticleView: CustomWKWebView, ArticleContentView, WKNavigationDelega
             menuItems.remove(at: index)
         }
 
-        if let index = menuItems.firstIndex(where: { $0.identifier == .WKMenuItemOpenLinkInNewWindow }) {
-
-            menuItems[index].title = NSLocalizedString("Open Link in New Tab", comment: "")
-
-            let openInBackgroundTitle = NSLocalizedString("Open Link in Background", comment: "")
-            let openInBackgroundItem = NSMenuItem(title: openInBackgroundTitle, action: #selector(openLinkInBackground(menuItem:)), keyEquivalent: "")
-            openInBackgroundItem.identifier = .WKMenuItemOpenLinkInBackground
-            openInBackgroundItem.representedObject = url
-            menuItems.insert(openInBackgroundItem, at: menuItems.index(after: index))
-        }
     }
 
     @objc
-    func openLinkInBackground(menuItem: NSMenuItem) {
-        if let url = menuItem.representedObject as? URL {
-            _ = NSApp.appController.browser.createNewTab(url, inBackground: true, load: true)
+    func processMenuItem(_ menuItem: NSMenuItem) {
+        guard let url = menuItem.representedObject as? URL else {
+            return
         }
-    }
-
-    @objc
-    func openLinkInDefaultBrowser(menuItem: NSMenuItem) {
-        if let url = menuItem.representedObject as? URL {
+        switch menuItem.identifier {
+        case NSUserInterfaceItemIdentifier.WKMenuItemOpenLinkInBackground:
+            NSApp.appController.browser.createNewTab(url, inBackground: true, load: true)
+        case NSUserInterfaceItemIdentifier.WKMenuItemOpenLinkInNewWindow, NSUserInterfaceItemIdentifier.WKMenuItemOpenImageInNewWindow, NSUserInterfaceItemIdentifier.WKMenuItemOpenMediaInNewWindow:
+            NSApp.appController.browser.createNewTab(url, inBackground: false, load: true)
+        case NSUserInterfaceItemIdentifier.WKMenuItemOpenLinkInSystemBrowser:
             NSApp.appController.openURL(inDefaultBrowser: url)
+        case NSUserInterfaceItemIdentifier.WKMenuItemDownloadImage, NSUserInterfaceItemIdentifier.WKMenuItemDownloadMedia, NSUserInterfaceItemIdentifier.WKMenuItemDownloadLinkedFile:
+            DownloadManager.shared.downloadFile(fromURL: url.absoluteString)
+        default:
+            break
         }
-    }
-
-    @objc
-    func contextMenuItemAction(menuItem: NSMenuItem) {
-        contextMenuCustomizer.contextMenuItemAction(menuItem: menuItem)
     }
 
     deinit {

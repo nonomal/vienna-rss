@@ -24,59 +24,11 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface Preferences : NSObject {
-	id userPrefs;
-	NSString * profilePath;
-	NSString * preferencesPath;
-	float markReadInterval;
-	NSInteger minimumFontSize;
-	NSInteger refreshFrequency;
-	NSInteger autoExpireDuration;
-	NSInteger filterMode;
-	NSInteger layout;
-	NSInteger newArticlesNotification;
-	NSInteger foldersTreeSortMethod;
-	BOOL refreshOnStartup;
-	BOOL alwaysAcceptBetas;
-	BOOL enableMinimumFontSize;
-	BOOL openLinksInVienna;
-	BOOL openLinksInBackground;
-	BOOL hasPrefs;
-	BOOL showFolderImages;
-	BOOL useJavaScript;
-    BOOL useNewBrowser;
-	BOOL showAppInStatusBar;
-	BOOL showStatusBar;
-	BOOL showFilterBar;
-	BOOL shouldSaveFeedSource;
-    BOOL syncGoogleReader;
-    BOOL prefersGoogleNewSubscription;
-    BOOL markUpdatedAsNew;
-	NSString * displayStyle;
-	CGFloat textSizeMultiplier;
-	NSString * defaultDatabase;
-	NSString * imagesFolder;
-	NSString * scriptsFolder;
-	NSString * stylesFolder;
-	NSString * pluginsFolder;
-	NSString * feedSourcesFolder;
-	NSFont * folderFont;
-	NSFont * articleFont;
-	NSArray * articleSortDescriptors;
-	SearchMethod * searchMethod;
-	NSUInteger concurrentDownloads;
-	NSString * syncServer;
-	NSString * syncingUser;
-}
+@interface Preferences : NSObject
 
-// String constants for NSNotificationCenter
-extern NSString * const kMA_Notify_MinimumFontSizeChange;
-extern NSString * const kMA_Notify_UseJavaScriptChange;
-
-@property (class, readonly) Preferences *standardPreferences;
+@property (class, readonly, nonatomic) Preferences *standardPreferences;
 
 // Accessor functions
--(void)savePreferences;
 -(BOOL)boolForKey:(NSString *)defaultName;
 -(NSInteger)integerForKey:(NSString *)defaultName;
 -(NSString *)stringForKey:(NSString *)defaultName;
@@ -87,22 +39,11 @@ extern NSString * const kMA_Notify_UseJavaScriptChange;
 -(void)setString:(NSString *)value forKey:(NSString *)defaultName;
 -(void)setArray:(NSArray *)value forKey:(NSString *)defaultName;
 -(void)setObject:(id)value forKey:(NSString *)defaultName;
+- (void)removeObjectForKey:(NSString *)defaultName;
 
 // Path to default database
 -(NSString *)defaultDatabase;
 -(void)setDefaultDatabase:(NSString *)newDatabase;
-
-// Path to scripts folder
-@property (readonly, nonatomic) NSString *scriptsFolder;
-
-// Path to images folder
-@property (readonly, nonatomic) NSString *imagesFolder;
-
-// Path to styles folder
-@property (readonly, nonatomic) NSString *stylesFolder;
-
-// Path to the external plugins folder
-@property (readonly, nonatomic) NSString *pluginsFolder;
 
 // Read-only internal settings
 @property (nonatomic, readonly) NSInteger backTrackQueueSize;
@@ -152,25 +93,18 @@ extern NSString * const kMA_Notify_UseJavaScriptChange;
 -(void)setDisplayStyle:(NSString *)newStyle withNotification:(BOOL)flag;
 @property (nonatomic) CGFloat textSizeMultiplier;
 
-// Folder list font
-@property (nonatomic, copy) NSString *folderListFont;
-@property (nonatomic) NSInteger folderListFontSize;
-
 // Article list font
 @property (nonatomic, copy) NSString *articleListFont;
 @property (nonatomic) NSInteger articleListFontSize;
 
 // Article list sort descriptors
-@property (nonatomic, copy) NSArray *articleSortDescriptors;
+@property (null_resettable, nonatomic, copy) NSArray *articleSortDescriptors;
 
 // Automatically sort folders tree
 @property (nonatomic) NSInteger foldersTreeSortMethod;
 
 // Do we show an icon in the status bar?
 @property (nonatomic) BOOL showAppInStatusBar;
-
-// Handle update via Sparkle / ViennaSparkleDelegate
--(void)handleUpdateRestart;
 
 // Show or hide the status bar
 @property (nonatomic) BOOL showStatusBar;
@@ -194,10 +128,6 @@ extern NSString * const kMA_Notify_UseJavaScriptChange;
 // User Agent Name
 @property (nonatomic) NSString *userAgentName;
 
-#pragma mark Browser choice
-
-@property (nonatomic) BOOL useNewBrowser;
-
 #pragma mark Open Reader syncing
 
 @property (nonatomic) BOOL syncGoogleReader;
@@ -206,6 +136,7 @@ extern NSString * const kMA_Notify_UseJavaScriptChange;
 
 // server used for syncing
 @property (nonatomic, copy) NSString *syncServer;
+@property (nonatomic, copy) NSString *syncScheme;
 
 // username used for syncing
 @property (nonatomic, copy) NSString *syncingUser;

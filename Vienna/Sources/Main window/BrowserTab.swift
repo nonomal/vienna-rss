@@ -18,7 +18,7 @@
 //
 
 import Cocoa
-import WebKit
+@preconcurrency import WebKit
 
 // MARK: State
 
@@ -62,7 +62,7 @@ class BrowserTab: NSViewController {
     var navigationEndHandler: [(_ success: Bool) -> Void] = []
 
     /// backing storage only, access via rssSubscriber property
-    weak var rssDelegate: RSSSubscriber?
+    weak var rssDelegate: (any RSSSubscriber)?
     /// backing storage only, access via rssUrl property
     var rssFeedUrls: [URL] = []
 
@@ -76,7 +76,7 @@ class BrowserTab: NSViewController {
     private var urlObservation: NSKeyValueObservation?
     private var statusBarObservation: NSKeyValueObservation?
 
-    private var statusBar: OverlayStatusBar?
+    private(set) var statusBar: OverlayStatusBar?
 
     // MARK: object lifecycle
 
@@ -171,6 +171,8 @@ class BrowserTab: NSViewController {
 
         self.viewDidLoadRss()
 
+        self.viewDidLoadHoverLinkUI()
+
         updateWebViewInsets()
 
         // set up address bar handling
@@ -228,17 +230,11 @@ extension BrowserTab: Tab {
 
     func back() -> Bool {
         let couldGoBack = self.webView.goBack() != nil
-        // title and url observation not triggered by goBack() -> manual setting
-        self.url = self.webView.url
-        updateTabTitle()
         return couldGoBack
     }
 
     func forward() -> Bool {
         let couldGoForward = self.webView.goForward() != nil
-        // title observation not triggered by goForware() -> manual setting
-        self.url = self.webView.url
-        updateTabTitle()
         return couldGoForward
     }
 
@@ -301,13 +297,8 @@ extension BrowserTab: Tab {
 
     func closeTab() {
         stopLoadingTab()
-        // free webView by force stopping JavaScript and resetting delegates
-        self.webView.evaluateJavaScript("window.location.replace('about:blank');") { _, _ in
-            DispatchQueue.main.async {
-                self.webView.navigationDelegate = nil
-                self.webView.uiDelegate = nil
-            }
-        }
+        // free webView by force stopping JavaScript
+        self.webView.evaluateJavaScript("window.location.replace('about:blank');")
     }
 
     @objc
@@ -325,10 +316,8 @@ extension BrowserTab: Tab {
         webView.makeTextLarger(self)
     }
 
-    func printPage() {
-        // TODO: neither Javascript nor the native print methods work here. This is a webkit bug:
-        // rdar://problem/36557179
-        self.webView.printView(nil)
+    func printDocument(_ sender: Any?) {
+        webView.printView(sender)
     }
 
     func activateAddressBar() {
@@ -344,20 +333,52 @@ extension BrowserTab: Tab {
 
 extension BrowserTab: WKNavigationDelegate {
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
-        handleNavigationStart()
-        if let webView = webView as? CustomWKWebView {
-            webView.hoverListener = self
-            self.statusBar?.label = ""
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let url = navigationAction.request.url, url.scheme == "mailto" {
+            decisionHandler(.cancel)
+            NSApp.appController.openURL(inDefaultBrowser: url)
+            return
+        }
+        if navigationAction.navigationType == .linkActivated {
+            let commandKey = navigationAction.modifierFlags.contains(.command)
+            let optionKey = navigationAction.modifierFlags.contains(.option)
+            if commandKey {
+                decisionHandler(.cancel)
+                NSApp.appController.browser.createNewTabAfterSelected(navigationAction.request.url, inBackground: true, load: true)
+            } else if optionKey {
+                decisionHandler(.cancel)
+                NSApp.appController.open(navigationAction.request.url, inPreferredBrowser: false)
+            } else if navigationAction.targetFrame == nil { // link with target="_blank"
+                decisionHandler(.cancel)
+                NSApp.appController.browser.createNewTabAfterSelected(navigationAction.request.url, inBackground: false, load: true)
+            } else {
+                decisionHandler(.allow)
+            }
+        } else {
+            decisionHandler(.allow)
         }
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: Error) {
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.canShowMIMEType {
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.cancel)
+            let filename = navigationResponse.response.suggestedFilename
+            DownloadManager.shared.downloadFile(fromURL: url?.absoluteString, withFilename: filename)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
+        handleNavigationStart()
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation?, withError error: any Error) {
         // TODO: provisional navigation fail seems to translate to error in resolving URL or similar. Treat different from normal navigation fail
         handleNavigationEnd(success: false)
     }
 
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: Error) {
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation?, withError error: any Error) {
         // TODO: show failure to load as page or symbol
         handleNavigationEnd(success: false)
     }
@@ -382,22 +403,5 @@ extension BrowserTab: WKNavigationDelegate {
 
     func registerNavigationEndHandler(_ navigationEndHandler: @escaping (_ success: Bool) -> Void) {
         self.navigationEndHandler.append(navigationEndHandler)
-    }
-}
-
-// MARK: Javascript messages handler
-
-extension BrowserTab: WKScriptMessageHandler {
-
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if self.statusBar != nil {
-            if message.name == CustomWKWebView.mouseDidEnterName {
-                if let link = message.body as? String {
-                    self.statusBar?.label = link
-                }
-            } else if message.name == CustomWKWebView.mouseDidExitName {
-                self.statusBar?.label = ""
-            }
-        }
     }
 }

@@ -19,13 +19,12 @@
 //
 
 @import Cocoa;
-@import WebKit;
 
 @class DownloadItem;
 
-@interface DownloadManager : NSObject <NSURLSessionDownloadDelegate, WebDownloadDelegate>
+@interface DownloadManager : NSObject <NSURLSessionDownloadDelegate>
 
-@property (class, readonly) DownloadManager *sharedInstance NS_SWIFT_NAME(shared);
+@property (class, readonly, nonatomic) DownloadManager *sharedInstance NS_SWIFT_NAME(shared);
 
 @property (readonly, nonatomic) NSArray<DownloadItem *> *downloadsList;
 @property (readonly, nonatomic) BOOL hasActiveDownloads;
@@ -37,5 +36,6 @@
 - (void)cancelItem:(DownloadItem *)item;
 - (void)removeItem:(DownloadItem *)item;
 - (void)downloadFileFromURL:(NSString *)url;
+- (void)downloadFileFromURL:(NSString *)url withFilename:(NSString *)filename;
 
 @end

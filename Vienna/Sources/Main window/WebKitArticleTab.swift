@@ -35,7 +35,7 @@ class WebKitArticleTab: BrowserTab, ArticleContentView {
         }
     }
 
-    var listView: ArticleViewDelegate?
+    var listView: (any ArticleViewDelegate)?
 
     var articles: [Article] {
         get {
@@ -69,10 +69,6 @@ class WebKitArticleTab: BrowserTab, ArticleContentView {
         hideAddressBar(true)
     }
 
-    func printDocument(_ sender: Any) {
-        // TODO
-    }
-
     // MARK: gui
 
     override func activateAddressBar() {
@@ -102,7 +98,7 @@ class WebKitArticleTab: BrowserTab, ArticleContentView {
 
     // MARK: Navigation delegate
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    override func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         // TODO: how do forms work in the article view?
         // i.e. navigationAction.navigationType == .formSubmitted or .formResubmitted
         // TODO: in the future, we might want to allow limited browsing in the primary tab
@@ -113,8 +109,19 @@ class WebKitArticleTab: BrowserTab, ArticleContentView {
             let openInPreferredBrower = !navigationAction.modifierFlags.contains(.option)
             // TODO: maybe we need to add an api that opens a clicked link in foreground to the AppController
             NSApp.appController.open(navigationAction.request.url, inPreferredBrowser: openInPreferredBrower)
+            NSApp.mainWindow?.makeFirstResponder((NSApp.appController.articleListView).mainView)
         } else {
             decisionHandler(.allow)
         }
+    }
+
+    override func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        super.webView(webView, didFinish: navigation)
+        NotificationCenter.default.post(name: .articleViewEnded, object: self)
+    }
+
+    override func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        super.webView(webView, didFailProvisionalNavigation: navigation, withError: error)
+        NotificationCenter.default.post(name: .articleViewEnded, object: self)
     }
 }
